@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template, flash, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate # Добавить этот импорт
+import os # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
 from datetime import datetime, timezone # Обновленный импорт для datetime
 
 app = Flask(__name__)
@@ -8,7 +9,7 @@ app = Flask(__name__)
 #app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///finance_app.db'
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///finance_app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'your_secret_key' # Важно для flash сообщений
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_secret_key'
 db = SQLAlchemy(app)
 migrate = Migrate(app, db) # Инициализация Flask-Migrate
 
