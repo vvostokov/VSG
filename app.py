@@ -1,17 +1,18 @@
 from flask import Flask, request, jsonify, render_template, flash, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate # Добавить этот импорт
-import os # <--- ДОБАВИТЬ ЭТОТ ИМПОРТ
-from datetime import datetime, timezone # Обновленный импорт для datetime
+from flask_migrate import Migrate 
+import os 
+from datetime import datetime, timezone 
 
 app = Flask(__name__)
-# Конфигурация базы данных (SQLite для простоты)
-#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///finance_app.db'
+# Конфигурация базы данных
+# Для Render используется DATABASE_URL, для локальной разработки - sqlite
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///finance_app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_secret_key'
+# Для Render используется SECRET_KEY из переменных окружения, для локальной - заглушка
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_secret_key_12345' 
 db = SQLAlchemy(app)
-migrate = Migrate(app, db) # Инициализация Flask-Migrate
+migrate = Migrate(app, db)
 
 # --- Модели ---
 class Account(db.Model):
