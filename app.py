@@ -585,7 +585,7 @@ def ui_delete_transaction(transaction_id):
     return redirect(url_for('ui_transactions'))
 
 @app.route('/ui/debts')
-def ui_debts():фв
+def ui_debts():
     debts_data = Debt.query.order_by(Debt.created_at.desc()).all()
     return render_template('debts.html', debts=debts_data)
 
