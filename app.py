@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template, flash, redirect, url
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate 
 import os 
+import requests
 from datetime import datetime, timezone 
 
 # Инициализируем расширения глобально, но без привязки к приложению
@@ -95,6 +96,10 @@ class Transaction(db.Model): # type: ignore
     
     # Backref 'generated_cashback_entry' from Cashback.created_transaction
     # No need to define 'generated_cashback' here if backref is set in Cashback
+    
+    # Поля для списания баллов лояльности
+    spent_loyalty_points = db.Column(db.Float, nullable=True)
+    spent_loyalty_program_id = db.Column(db.Integer, db.ForeignKey('loyalty_program.id'), nullable=True)
 
     def __repr__(self):
         return f"<Transaction {self.transaction_type} {self.amount} on {self.date}>"
@@ -120,6 +125,51 @@ class CashbackRule(db.Model): # type: ignore
 
     def __repr__(self):
         return f"<CashbackRule '{self.name}' ({self.cashback_percentage*100}% for category ID {self.applies_to_category_id} to account ID {self.credit_to_account_id})>"
+
+# --- Модели для системы лояльности ---
+class LoyaltyProgram(db.Model):
+    __tablename__ = 'loyalty_program'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, unique=True)
+    description = db.Column(db.String(255), nullable=True)
+    # Процент от суммы покупки, который начисляется в виде баллов (например, 0.01 для 1%)
+    points_earn_percentage = db.Column(db.Float, nullable=False, default=0.01) 
+    # Соотношение баллов к валюте при списании (например, 1 балл = 1 рубль)
+    points_to_currency_ratio_spend = db.Column(db.Float, nullable=False, default=1.0) 
+    # Валюта, в которой эквивалентны баллы при списании
+    currency_equivalent = db.Column(db.String(10), nullable=False, default='RUB')
+    
+    accounts = db.relationship('LoyaltyAccount', backref='program', lazy='dynamic') # type: ignore
+    # Связь с транзакциями, где эта программа использовалась для списания баллов
+    transactions_with_points_spent = db.relationship('Transaction', backref='loyalty_program_ref', lazy=True, foreign_keys='Transaction.spent_loyalty_program_id') # type: ignore
+
+    def __repr__(self):
+        return f"<LoyaltyProgram {self.name}>"
+
+class LoyaltyAccount(db.Model):
+    __tablename__ = 'loyalty_account'
+    id = db.Column(db.Integer, primary_key=True)
+    loyalty_program_id = db.Column(db.Integer, db.ForeignKey('loyalty_program.id'), nullable=False)
+    # user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False) # Если будет система пользователей
+    balance_points = db.Column(db.Float, nullable=False, default=0.0)
+    
+    transactions = db.relationship('LoyaltyTransaction', backref='loyalty_account', lazy='dynamic') # type: ignore
+
+    def __repr__(self):
+        return f"<LoyaltyAccount for Program ID {self.loyalty_program_id}, Balance: {self.balance_points} points>"
+
+class LoyaltyTransaction(db.Model):
+    __tablename__ = 'loyalty_transaction'
+    id = db.Column(db.Integer, primary_key=True)
+    loyalty_account_id = db.Column(db.Integer, db.ForeignKey('loyalty_account.id'), nullable=False)
+    related_expense_transaction_id = db.Column(db.Integer, db.ForeignKey('transaction.id'), nullable=True)
+    transaction_type = db.Column(db.String(10), nullable=False)  # 'earn' или 'spend'
+    points_changed = db.Column(db.Float, nullable=False) # Положительное для начисления, отрицательное для списания
+    date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    description = db.Column(db.String(255), nullable=True)
+
+    def __repr__(self):
+        return f"<LoyaltyTransaction Type: {self.transaction_type}, Points: {self.points_changed}>"
 
 # Фабрика приложений
 def create_app_instance():
@@ -155,18 +205,115 @@ def create_app_instance():
 app = create_app_instance() # Создаем экземпляр приложения для использования декораторами @app.route
 
 # --- Маршруты для UI (пользовательского интерфейса) ---
+def get_crypto_prices(crypto_ids=['bitcoin', 'ethereum', 'litecoin']):
+    """
+    Получает текущие цены и изменение за 24ч для указанных криптовалют с CoinGecko.
+    """
+    prices_data = []
+    if not crypto_ids:
+        return prices_data
+    
+    ids_param = ",".join(crypto_ids)
+    # Для простоты используем RUB, но можно добавить выбор валюты
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_param}&vs_currencies=rub&include_24hr_change=true"
+    
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status() # Вызовет исключение для плохих статусов (4xx или 5xx)
+        data = response.json()
+        
+        for crypto_id in crypto_ids:
+            if crypto_id in data:
+                name = crypto_id.capitalize() # Простое имя
+                price_rub = data[crypto_id].get('rub')
+                change_24h = data[crypto_id].get('rub_24h_change')
+                
+                if price_rub is not None and change_24h is not None:
+                    prices_data.append({
+                        'name': name,
+                        'price': f"{price_rub:,.2f} RUB", # Форматирование с запятыми для тысяч
+                        'change_24h': round(change_24h, 2),
+                        'status_class': 'text-success' if change_24h > 0 else ('text-danger' if change_24h < 0 else 'text-muted')
+                    })
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching crypto prices: {e}") # Логирование ошибки
+        # В реальном приложении здесь можно вернуть кэшированные данные или специальный флаг ошибки
+    except ValueError as e: # Ошибка парсинга JSON
+        print(f"Error parsing crypto prices JSON: {e}")
+
+    return prices_data
+
+def get_moex_stock_data(secids=['SBER', 'GAZP', 'LKOH', 'YNDX']):
+    """
+    Получает данные по указанным акциям с Московской Биржи (MOEX ISS API).
+    Запрашивает последнюю цену и процентное изменение.
+    """
+    stock_data_list = []
+    if not secids:
+        return stock_data_list
+
+    # Формируем строку с SECID через запятую для запроса
+    securities_param = ",".join(secids)
+    # URL для получения данных по котировкам TQBR (основной режим торгов акциями)
+    # iss.only=securities,marketdata - запрашиваем только нужные блоки данных
+    # securities.columns=SECID,SHORTNAME - из блока securities берем тикер и краткое имя
+    # marketdata.columns=SECID,LAST,CHANGE,OPEN,ISSUECAPITALIZATION - из блока marketdata берем тикер, последнюю цену, изменение к предыдущему дню, цену открытия, капитализацию
+    url = (f"https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities.json?"
+           f"securities={securities_param}&iss.meta=off&iss.only=securities,marketdata&"
+           f"securities.columns=SECID,SHORTNAME&marketdata.columns=SECID,LAST,CHANGE,OPEN,ISSUECAPITALIZATION")
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        securities_info = {s[0]: {'name': s[1]} for s in data['securities']['data']}
+        market_data_cols = data['marketdata']['columns']
+        market_data_rows = data['marketdata']['data']
+
+        # Находим индексы нужных столбцов
+        idx_secid = market_data_cols.index('SECID')
+        idx_last = market_data_cols.index('LAST')
+        idx_change = market_data_cols.index('CHANGE') # Это изменение в % к предыдущему дню/цене закрытия
+
+        for row in market_data_rows:
+            secid = row[idx_secid]
+            last_price = row[idx_last]
+            change_percent = row[idx_change] # Уже в процентах
+
+            if secid in securities_info and last_price is not None and change_percent is not None:
+                stock_data_list.append({
+                    'symbol': secid,
+                    'name': securities_info[secid]['name'],
+                    'price': f"{last_price:,.2f} RUB",
+                    'change_percent': round(change_percent, 2),
+                    'status_class': 'text-success' if change_percent > 0 else ('text-danger' if change_percent < 0 else 'text-muted')
+                })
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching MOEX stock data: {e}")
+    except (ValueError, KeyError) as e: # Ошибка парсинга JSON или отсутствия ключей
+        print(f"Error parsing MOEX stock data JSON: {e}")
+    return stock_data_list
 
 @app.route('/')
 def index():
     total_balance_data = get_total_balance_data()
-    recent_transactions = Transaction.query.order_by(Transaction.date.desc()).limit(5).all()
-    
-    # Получаем сводку по кэшбэку
+    recent_transactions = Transaction.query.order_by(Transaction.date.desc()).limit(5).all()   
     cashback_summary_raw = db.session.query(
         Cashback.currency,
         db.func.sum(Cashback.amount).label('total_cashback')
     ).group_by(Cashback.currency).all()
-    
+    total_cashback_by_currency = {currency: round(total, 2) for currency, total in cashback_summary_raw}
+
+    crypto_data = get_crypto_prices(['bitcoin', 'ethereum', 'solana', 'ripple']) # Запрашиваем данные
+    moex_data = get_moex_stock_data(['SBER', 'GAZP', 'LKOH', 'YNDX', 'ROSN']) # Запрашиваем данные с MOEX
+
+    return render_template('index.html',
+                           total_balance_by_currency=total_balance_data,
+                           recent_transactions=recent_transactions,
+                           total_cashback_by_currency=total_cashback_by_currency,
+                           crypto_data=crypto_data,
+                           moex_data=moex_data) # Передаем данные MOEX в шаблон
     total_cashback_by_currency = {currency: round(total, 2) for currency, total in cashback_summary_raw}
 
     return render_template('index.html',
@@ -507,11 +654,134 @@ def ui_add_transaction_form():
 @app.route('/ui/transactions/<int:transaction_id>/edit', methods=['GET', 'POST'])
 def ui_edit_transaction_form(transaction_id):
     transaction_to_edit = Transaction.query.get_or_404(transaction_id)
-    # TODO: Implement GET to show form pre-filled with transaction_to_edit data
-    # TODO: Implement POST to update transaction and account balances, handle cashback
+    
+    # Не позволяем редактировать транзакции, связанные с погашением долга, через эту форму
+    if transaction_to_edit.transaction_type in ['debt_repayment_expense', 'debt_repayment_income']:
+        flash('Транзакции по погашению долгов следует управлять через интерфейс долгов.', 'warning')
+        return redirect(url_for('ui_transactions'))
+
     if request.method == 'POST':
-        # Logic for updating the transaction will go here
-        flash('Функция редактирования транзакции в разработке.', 'info')
+        # Сохраняем старые значения для корректного отката
+        old_amount = transaction_to_edit.amount
+        old_type = transaction_to_edit.transaction_type
+        old_account_id = transaction_to_edit.account_id
+        old_to_account_id = transaction_to_edit.to_account_id
+        old_account = Account.query.get(old_account_id)
+        old_to_account = Account.query.get(old_to_account_id) if old_to_account_id else None
+
+        # Получаем новые значения из формы
+        new_amount_str = request.form.get('amount')
+        new_type = request.form.get('transaction_type')
+        new_account_id = request.form.get('account_id', type=int)
+        new_category_id_str = request.form.get('category_id')
+        new_date_str = request.form.get('date')
+        new_description = request.form.get('description')
+        new_to_account_id_str = request.form.get('to_account_id')
+
+        new_category_id = int(new_category_id_str) if new_category_id_str and new_category_id_str.isdigit() else None
+        new_to_account_id = int(new_to_account_id_str) if new_to_account_id_str and new_to_account_id_str.isdigit() else None
+
+        # Валидация (аналогично ui_add_transaction_form)
+        if not all([new_amount_str, new_type, new_account_id, new_date_str]):
+            flash('Заполните все обязательные поля: Сумма, Тип, Счет, Дата.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+        try:
+            new_amount = float(new_amount_str)
+            if new_amount <= 0: raise ValueError("Amount must be positive")
+        except ValueError:
+            flash('Некорректная сумма.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+        
+        new_account = Account.query.get(new_account_id)
+        if not new_account:
+            flash('Новый основной счет не найден.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+
+        new_category = Category.query.get(new_category_id) if new_category_id else None
+        if new_category_id and not new_category and new_type != 'transfer':
+            flash('Новая категория не найдена.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+        
+        if new_category and new_type == 'income' and new_category.type != 'income':
+            flash(f'Категория "{new_category.name}" не является доходной.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+        if new_category and new_type == 'expense' and new_category.type != 'expense':
+            flash(f'Категория "{new_category.name}" не является расходной.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+        if new_type in ['income', 'expense'] and not new_category_id:
+            flash('Категория обязательна для транзакций типа "доход" или "расход".', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+
+        try:
+            new_date = datetime.strptime(new_date_str, '%Y-%m-%d')
+        except ValueError:
+            flash('Некорректный формат даты.', 'danger')
+            return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+
+        # 1. Откатываем старую транзакцию
+        if old_account:
+            if old_type == 'income': old_account.balance -= old_amount
+            elif old_type == 'expense': old_account.balance += old_amount
+            elif old_type == 'transfer' and old_to_account:
+                old_account.balance += old_amount
+                old_to_account.balance -= old_amount
+        
+        # 2. Удаляем старый кэшбэк, если он был порожден этой транзакцией
+        cashback_entry_from_this_expense = Cashback.query.filter_by(original_expense_transaction_id=transaction_to_edit.id).first()
+        if cashback_entry_from_this_expense:
+            cashback_income_transaction = cashback_entry_from_this_expense.created_transaction
+            if cashback_income_transaction:
+                cashback_target_account = cashback_income_transaction.account_ref
+                if cashback_target_account:
+                    cashback_target_account.balance -= cashback_income_transaction.amount
+                db.session.delete(cashback_income_transaction)
+            db.session.delete(cashback_entry_from_this_expense)
+
+        # 3. Обновляем саму транзакцию
+        transaction_to_edit.amount = new_amount
+        transaction_to_edit.transaction_type = new_type
+        transaction_to_edit.date = new_date
+        transaction_to_edit.description = new_description
+        transaction_to_edit.account_id = new_account_id
+        transaction_to_edit.category_id = new_category_id if new_type != 'transfer' else None
+        transaction_to_edit.to_account_id = None # Сбрасываем на случай, если тип изменился с перевода
+
+        # 4. Применяем новую транзакцию
+        if new_type == 'income':
+            new_account.balance += new_amount
+        elif new_type == 'expense':
+            new_account.balance -= new_amount
+        elif new_type == 'transfer':
+            if not new_to_account_id:
+                flash('Для перевода необходимо указать счет назначения.', 'danger')
+                db.session.rollback() # Откатываем изменения балансов, если они были
+                return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+            if new_to_account_id == new_account_id:
+                flash('Нельзя перевести средства на тот же счет.', 'danger')
+                db.session.rollback()
+                return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+            new_to_account = Account.query.get(new_to_account_id)
+            if not new_to_account:
+                flash('Счет назначения не найден.', 'danger')
+                db.session.rollback()
+                return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+            if new_account.currency != new_to_account.currency:
+                flash(f'Переводы между счетами с разной валютой ({new_account.currency} -> {new_to_account.currency}) пока не поддерживаются.', 'warning')
+                db.session.rollback()
+                return render_template('edit_transaction.html', transaction=transaction_to_edit, accounts=Account.query.all(), categories=Category.query.all())
+            
+            new_account.balance -= new_amount
+            new_to_account.balance += new_amount
+            transaction_to_edit.to_account_id = new_to_account_id
+            transaction_to_edit.category_id = None
+
+        # 5. Применяем правила кэшбэка к обновленной транзакции, если это расход
+        if transaction_to_edit.transaction_type == 'expense':
+            db.session.flush() # Убедимся, что транзакция имеет все обновленные данные перед передачей в _apply_cashback_rules
+            _apply_cashback_rules(transaction_to_edit)
+
+        db.session.commit()
+        flash('Транзакция успешно обновлена!', 'success')
         return redirect(url_for('ui_transactions'))
 
     accounts_data = Account.query.order_by(Account.name).all()
@@ -725,6 +995,79 @@ def ui_repay_debt_form(debt_id):
     accounts_data = Account.query.order_by(Account.name).all()
     return render_template('repay_debt.html', debt=debt, accounts=accounts_data, remaining_debt=remaining_debt, now=datetime.now(timezone.utc))
 
+# --- UI для Категорий ---
+@app.route('/ui/categories')
+def ui_categories():
+    categories_data = Category.query.order_by(Category.type, Category.name).all()
+    return render_template('categories.html', categories=categories_data)
+
+@app.route('/ui/add-category', methods=['GET', 'POST'])
+def ui_add_category_form():
+    if request.method == 'POST':
+        name = request.form.get('name')
+        category_type = request.form.get('type')
+
+        if not name or not category_type:
+            flash('Название и тип категории обязательны.', 'danger')
+            return redirect(url_for('ui_add_category_form'))
+
+        if category_type not in ['income', 'expense']:
+            flash('Недопустимый тип категории.', 'danger')
+            return redirect(url_for('ui_add_category_form'))
+
+        existing_category = Category.query.filter_by(name=name).first()
+        if existing_category:
+            flash(f'Категория с названием "{name}" уже существует.', 'warning')
+            return redirect(url_for('ui_add_category_form'))
+
+        new_category = Category(name=name, type=category_type)
+        db.session.add(new_category)
+        db.session.commit()
+        flash(f'Категория "{name}" ({category_type}) успешно создана!', 'success')
+        return redirect(url_for('ui_categories'))
+        
+    return render_template('add_category.html')
+
+@app.route('/ui/categories/<int:category_id>/edit', methods=['GET', 'POST'])
+def ui_edit_category_form(category_id):
+    category = Category.query.get_or_404(category_id)
+    if request.method == 'POST':
+        new_name = request.form.get('name')
+        new_type = request.form.get('type')
+
+        if not new_name or not new_type:
+            flash('Название и тип категории обязательны.', 'danger')
+            return render_template('edit_category.html', category=category)
+
+        if new_type not in ['income', 'expense']:
+            flash('Недопустимый тип категории.', 'danger')
+            return render_template('edit_category.html', category=category)
+
+        if new_name != category.name:
+            existing_category_with_new_name = Category.query.filter(Category.name == new_name, Category.id != category_id).first()
+            if existing_category_with_new_name:
+                flash(f'Категория с названием "{new_name}" уже существует.', 'warning')
+                return render_template('edit_category.html', category=category)
+        
+        category.name = new_name
+        category.type = new_type
+        db.session.commit()
+        flash(f'Категория "{category.name}" успешно обновлена!', 'success')
+        return redirect(url_for('ui_categories'))
+
+    return render_template('edit_category.html', category=category)
+
+@app.route('/ui/categories/<int:category_id>/delete', methods=['POST'])
+def ui_delete_category(category_id):
+    category_to_delete = Category.query.get_or_404(category_id)
+    if Transaction.query.filter_by(category_id=category_id).first() or CashbackRule.query.filter_by(applies_to_category_id=category_id).first():
+        flash(f'Нельзя удалить категорию "{category_to_delete.name}", так как она используется в транзакциях или правилах кэшбэка.', 'danger')
+        return redirect(url_for('ui_categories'))
+    db.session.delete(category_to_delete)
+    db.session.commit()
+    flash(f'Категория "{category_to_delete.name}" успешно удалена.', 'success')
+    return redirect(url_for('ui_categories'))
+
 # --- UI для Правил Кэшбэка ---
 @app.route('/ui/cashback-rules')
 def ui_cashback_rules():
@@ -930,7 +1273,9 @@ def get_financial_summary_data(start_date=None, end_date=None, account_id=None):
     result = {
         'income_by_category': [], 'expense_by_category': [],
         'total_income': {}, 'total_expense': {}, 'net_flow': {},
-        'total_cashback_period': {} # Новое поле для кэшбэка за период
+        'total_cashback_period': {},
+        'expense_chart_data': {'labels': [], 'data': [], 'currency': None},
+        'income_chart_data': {'labels': [], 'data': [], 'currency': None}
     }
     for category_name, category_type, total, currency in summary_raw:
         item = {'category': category_name, 'total_amount': round(total or 0, 2), 'currency': currency}

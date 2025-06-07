@@ -13,6 +13,34 @@
         </div>
     </div>
 
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    Акции Московской Биржи (MOEX)
+                </div>
+                <div class="card-body">
+                    {% if moex_data %}
+                        <div class="row">
+                        {% for stock in moex_data %}
+                            <div class="col-lg-3 col-md-4 col-sm-6 mb-2">
+                                <strong>{{ stock.symbol }}</strong> ({{ stock.name }}):<br>
+                                {{ stock.price }}
+                                <span class="{{ stock.status_class }}">
+                                    ({{ stock.change_percent }}%)
+                                    {% if stock.change_percent > 0 %}▲{% elif stock.change_percent < 0 %}▼{% endif %}
+                                </span>
+                            </div>
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="card-text">Не удалось загрузить данные по акциям Мосбиржи.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row">
         <div class="col-md-6 mb-4">
             <div class="card">
@@ -45,6 +73,7 @@
                         <a href="{{ url_for('ui_add_transaction_form') }}" class="list-group-item list-group-item-action">Добавить транзакцию</a>
                         <a href="{{ url_for('ui_add_account_form') }}" class="list-group-item list-group-item-action">Добавить счет</a>
                         <a href="{{ url_for('ui_add_debt_form') }}" class="list-group-item list-group-item-action">Добавить долг</a>
+                        <a href="{{ url_for('ui_categories') }}" class="list-group-item list-group-item-action">Управление категориями</a>
                         <a href="{{ url_for('ui_transactions') }}" class="list-group-item list-group-item-action">Все транзакции</a>
                         <a href="{{ url_for('ui_analytics_overview') }}" class="list-group-item list-group-item-action">Аналитика</a>
                     </div>
@@ -52,7 +81,32 @@
             </div>
         </div>
     </div>
-
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    Курсы криптовалют (CoinGecko)
+                </div>
+                <div class="card-body">
+                    {% if crypto_data %}
+                        <div class="row">
+                        {% for crypto in crypto_data %}
+                            <div class="col-md-3 col-sm-6 mb-2">
+                                <strong>{{ crypto.name }}:</strong> {{ crypto.price }}
+                                <span class="{{ crypto.status_class }}">
+                                    ({{ crypto.change_24h }}%)
+                                    {% if crypto.change_24h > 0 %}▲{% elif crypto.change_24h < 0 %}▼{% endif %}
+                                </span>
+                            </div>
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                        <p class="card-text">Не удалось загрузить данные о курсах криптовалют.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="row mb-4">
         <div class="col-md-6 mb-4">
             <div class="card h-100">
@@ -101,7 +155,15 @@
                                     <tr>
                                         <td>{{ t.date.strftime('%Y-%m-%d') }}</td>
                                         <td>{{ t.description | default('Без описания', true) }}</td>
-                                        <td><span class="badge badge-info">{{ t.transaction_type }}</span></td>
+                                    <td>
+                                        {% if t.transaction_type == 'income' %}
+                                            <span class="badge badge-success">{{ t.transaction_type }}</span>
+                                        {% elif t.transaction_type == 'expense' %}
+                                            <span class="badge badge-danger">{{ t.transaction_type }}</span>
+                                        {% else %}
+                                            <span class="badge badge-info">{{ t.transaction_type }}</span>
+                                        {% endif %}
+                                    </td>
                                         <td class="text-right {% if t.transaction_type == 'income' %}text-success{% elif t.transaction_type == 'expense' %}text-danger{% endif %}">{{ "%.2f"|format(t.amount) }} {{ t.account_ref.currency }}</td>
                                         <td>{{ t.account_ref.name if t.account_ref else 'N/A' }}</td>
                                         <td>{{ t.category_ref.name if t.category_ref else '-' }}</td>

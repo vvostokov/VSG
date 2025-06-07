@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить категорию - Финансовый Помощник{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Добавить новую категорию</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('ui_add_category_form') }}">
+        <div class="mb-3">
+            <label for="name" class="form-label">Название категории</label>
+            <input type="text" class="form-control" id="name" name="name" required>
+        </div>
+        <div class="mb-3">
+            <label for="type" class="form-label">Тип категории</label>
+            <select class="form-select" id="type" name="type" required>
+                <option value="" selected disabled>Выберите тип...</option>
+                <option value="income">Доход</option>
+                <option value="expense">Расход</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Добавить категорию</button>
+        <a href="{{ url_for('ui_categories') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+{% endblock %}

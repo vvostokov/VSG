@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать категорию - Финансовый Помощник{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Редактировать категорию: {{ category.name }}</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for cat, message in messages %}
+            <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('ui_edit_category_form', category_id=category.id) }}">
+        <div class="mb-3">
+            <label for="name" class="form-label">Название категории</label>
+            <input type="text" class="form-control" id="name" name="name" value="{{ category.name }}" required>
+        </div>
+        <div class="mb-3">
+            <label for="type" class="form-label">Тип категории</label>
+            <select class="form-select" id="type" name="type" required>
+                <option value="income" {% if category.type == 'income' %}selected{% endif %}>Доход</option>
+                <option value="expense" {% if category.type == 'expense' %}selected{% endif %}>Расход</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+        <a href="{{ url_for('ui_categories') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+{% endblock %}
