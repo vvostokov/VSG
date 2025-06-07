@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать транзакцию #{{ transaction.id }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Редактировать транзакцию #{{ transaction.id }}</h1>
+</div>
+
+<form method="POST" action="{{ url_for('ui_edit_transaction_form', transaction_id=transaction.id) }}">
+    <div class="form-row">
+        <div class="form-group col-md-4">
+            <label for="amount">Сумма</label>
+            <input type="number" step="0.01" class="form-control" id="amount" name="amount" value="{{ transaction.amount }}" required>
+        </div>
+        <div class="form-group col-md-4">
+            <label for="transaction_type">Тип транзакции</label>
+            <select class="form-control" id="transaction_type" name="transaction_type" required>
+                <option value="income" {% if transaction.transaction_type == 'income' %}selected{% endif %}>Доход</option>
+                <option value="expense" {% if transaction.transaction_type == 'expense' %}selected{% endif %}>Расход</option>
+                <option value="transfer" {% if transaction.transaction_type == 'transfer' %}selected{% endif %}>Перевод</option>
+                {# Типы debt_repayment_* обычно не редактируются напрямую таким образом, а через интерфейс долгов #}
+                {# Если нужно их редактировать, можно добавить, но это усложнит логику #}
+            </select>
+        </div>
+        <div class="form-group col-md-4">
+            <label for="date">Дата</label>
+            <input type="date" class="form-control" id="date" name="date" value="{{ transaction.date.strftime('%Y-%m-%d') }}" required>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group col-md-6">
+            <label for="account_id">Счет</label>
+            <select class="form-control" id="account_id" name="account_id" required>
+                {% for acc in accounts %}
+                <option value="{{ acc.id }}" {% if acc.id == transaction.account_id %}selected{% endif %}>{{ acc.name }} ({{ acc.currency }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group col-md-6" id="to_account_group" {% if transaction.transaction_type != 'transfer' %}style="display: none;"{% endif %}>
+            <label for="to_account_id">На счет (для переводов)</label>
+            <select class="form-control" id="to_account_id" name="to_account_id">
+                <option value="">-- Выберите счет --</option>
+                {% for acc in accounts %}
+                {# Нельзя перевести на тот же счет, с которого перевод #}
+                <option value="{{ acc.id }}" {% if acc.id == transaction.to_account_id %}selected{% endif %} {% if acc.id == transaction.account_id %}disabled{% endif %}>{{ acc.name }} ({{ acc.currency }})</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    
+    <div class="form-row">
+        <div class="form-group col-md-6" id="category_group" {% if transaction.transaction_type == 'transfer' %}style="display: none;"{% endif %}>
+            <label for="category_id">Категория</label>
+            <select class="form-control" id="category_id" name="category_id">
+                <option value="">-- Без категории --</option>
+                {% for cat in categories %}
+                    <option value="{{ cat.id }}" data-type="{{ cat.type }}" {% if cat.id == transaction.category_id %}selected{% endif %}>{{ cat.name }} ({{cat.type}})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group col-md-6">
+            <label for="description">Описание</label>
+            <input type="text" class="form-control" id="description" name="description" value="{{ transaction.description or '' }}">
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+    <a href="{{ url_for('ui_transactions') }}" class="btn btn-secondary">Отмена</a>
+</form>
+
+<script>
+    // Скрипт для отображения/скрытия полей "На счет" и "Категория" и фильтрации категорий
+    // (Аналогичен тому, что был в add_transaction.html, но адаптирован для edit)
+    const transactionTypeSelectEdit = document.getElementById('transaction_type');
+    const toAccountGroupEdit = document.getElementById('to_account_group');
+    const toAccountSelectEdit = document.getElementById('to_account_id');
+    const categoryGroupEdit = document.getElementById('category_group');
+    const categorySelectEdit = document.getElementById('category_id');
+    const accountSelectEdit = document.getElementById('account_id');
+    const originalCategoryOptionsEdit = Array.from(categorySelectEdit.options);
+
+    function updateToAccountOptions() {
+        const fromAccountId = accountSelectEdit.value;
+        for (let i = 0; i < toAccountSelectEdit.options.length; i++) {
+            if (toAccountSelectEdit.options[i].value === fromAccountId) {
+                toAccountSelectEdit.options[i].disabled = true;
+                if (toAccountSelectEdit.options[i].selected) { // Если выбран тот же счет, сбрасываем
+                    toAccountSelectEdit.value = "";
+                }
+            } else {
+                toAccountSelectEdit.options[i].disabled = false;
+            }
+        }
+    }
+
+    function toggleFieldsEdit() {
+        const selectedType = transactionTypeSelectEdit.value;
+        updateToAccountOptions(); // Обновляем доступность счетов при смене типа или основного счета
+
+        if (selectedType === 'transfer') {
+            toAccountGroupEdit.style.display = 'block';
+            toAccountSelectEdit.required = true;
+            categoryGroupEdit.style.display = 'none';
+            categorySelectEdit.required = false;
+            if(categorySelectEdit) categorySelectEdit.value = ""; 
+        } else {
+            toAccountGroupEdit.style.display = 'none';
+            toAccountSelectEdit.required = false;
+            if(toAccountSelectEdit) toAccountSelectEdit.value = ""; 
+            categoryGroupEdit.style.display = 'block';
+            categorySelectEdit.required = (selectedType === 'income' || selectedType === 'expense');
+            
+            categorySelectEdit.innerHTML = ''; 
+            originalCategoryOptionsEdit.forEach(option => {
+                if (option.value === "" || option.dataset.type === selectedType) {
+                    categorySelectEdit.add(option.cloneNode(true));
+                }
+            });
+            // Восстанавливаем выбранное значение категории, если оно соответствует новому типу
+            const currentCategoryId = "{{ transaction.category_id or '' }}";
+            if (categorySelectEdit.querySelector('option[value="' + currentCategoryId + '"]')) {
+                 categorySelectEdit.value = currentCategoryId;
+            } else {
+                categorySelectEdit.value = ""; // Сбрасываем, если старая категория не подходит
+            }
+        }
+    }
+    transactionTypeSelectEdit.addEventListener('change', toggleFieldsEdit);
+    accountSelectEdit.addEventListener('change', updateToAccountOptions); // Обновляем to_account при смене from_account
+
+    document.addEventListener('DOMContentLoaded', function() {
+        toggleFieldsEdit(); // Вызываем при загрузке, чтобы установить правильное состояние
+    });
+</script>
+
+{% endblock %}

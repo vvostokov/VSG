@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Главная - Финансовый Помощник{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="jumbotron py-4">
+                <h1 class="display-4">Финансовый Помощник</h1>
+                <p class="lead">Добро пожаловать! Управляйте своими финансами, отслеживайте расходы, доходы и долги.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    Общий баланс
+                </div>
+                <div class="card-body">
+                    {% if total_balance_by_currency %}
+                        <ul class="list-group list-group-flush">
+                        {% for currency, balance in total_balance_by_currency.items() %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ currency }}
+                                <span class="badge badge-primary badge-pill" style="font-size: 1em;">{{ "%.2f"|format(balance) }}</span>
+                            </li>
+                        {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="card-text">Нет данных о счетах для отображения общего баланса.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    Быстрые действия
+                </div>
+                <div class="card-body">
+                    <div class="list-group">
+                        <a href="{{ url_for('ui_add_transaction_form') }}" class="list-group-item list-group-item-action">Добавить транзакцию</a>
+                        <a href="{{ url_for('ui_add_account_form') }}" class="list-group-item list-group-item-action">Добавить счет</a>
+                        <a href="{{ url_for('ui_add_debt_form') }}" class="list-group-item list-group-item-action">Добавить долг</a>
+                        <a href="{{ url_for('ui_transactions') }}" class="list-group-item list-group-item-action">Все транзакции</a>
+                        <a href="{{ url_for('ui_analytics_overview') }}" class="list-group-item list-group-item-action">Аналитика</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    Сводка по Кэшбэку (всего)
+                </div>
+                <div class="card-body">
+                    {% if total_cashback_by_currency %}
+                        <ul class="list-group list-group-flush">
+                        {% for currency, total_amount in total_cashback_by_currency.items() %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                {{ currency }}
+                                <span class="badge badge-success badge-pill" style="font-size: 1em;">{{ "%.2f"|format(total_amount) }}</span>
+                            </li>
+                        {% else %}
+                             <p class="card-text">Вы еще не получали кэшбэк.</p>
+                        {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="card-text">Вы еще не получали кэшбэк.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4"> {/* Изменено с col-12 на col-md-6 */}
+            <div class="card">
+                <div class="card-header">
+                    Последние транзакции
+                </div>
+                <div class="card-body">
+                    {% if recent_transactions %}
+                        <div class="table-responsive">
+                            <table class="table table-hover table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Дата</th>
+                                        <th>Описание</th>
+                                        <th>Тип</th>
+                                        <th class="text-right">Сумма</th>
+                                        <th>Счет</th>
+                                        <th>Категория</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                {% for t in recent_transactions %}
+                                    <tr>
+                                        <td>{{ t.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ t.description | default('Без описания', true) }}</td>
+                                        <td><span class="badge badge-info">{{ t.transaction_type }}</span></td>
+                                        <td class="text-right {% if t.transaction_type == 'income' %}text-success{% elif t.transaction_type == 'expense' %}text-danger{% endif %}">{{ "%.2f"|format(t.amount) }} {{ t.account_ref.currency }}</td>
+                                        <td>{{ t.account_ref.name if t.account_ref else 'N/A' }}</td>
+                                        <td>{{ t.category_ref.name if t.category_ref else '-' }}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="card-text">Пока нет транзакций для отображения.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

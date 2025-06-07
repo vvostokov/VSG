@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Аналитика{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">Обзор Аналитики</h1>
+    </div>
+
+    <form method="GET" action="{{ url_for('ui_analytics_overview') }}" class="form-inline mb-4">
+        <div class="form-group mr-2">
+            <label for="start_date" class="mr-2">С:</label>
+            <input type="date" class="form-control form-control-sm" id="start_date" name="start_date" value="{{ current_start_date }}">
+        </div>
+        <div class="form-group mr-2">
+            <label for="end_date" class="mr-2">По:</label>
+            <input type="date" class="form-control form-control-sm" id="end_date" name="end_date" value="{{ current_end_date }}">
+        </div>
+        <div class="form-group mr-2">
+            <label for="account_id" class="mr-2">Счет:</label>
+            <select class="form-control form-control-sm" id="account_id" name="account_id">
+                <option value="">Все счета</option>
+                {% for acc in all_accounts %}
+                    <option value="{{ acc.id }}" {% if selected_account_id == acc.id %}selected{% endif %}>{{ acc.name }} ({{acc.currency}})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Применить фильтр</button>
+        <a href="{{ url_for('ui_analytics_overview') }}" class="btn btn-sm btn-secondary ml-2">Сбросить (тек. месяц)</a>
+    </form>
+
+    <div class="mb-3">
+        <h5>
+            Данные за период: <span class="text-primary">{{ current_start_date }}</span> - <span class="text-primary">{{ current_end_date }}</span>.
+            {% if selected_account_id %}
+                {% set selected_account = all_accounts | selectattr('id', 'equalto', selected_account_id) | first %}
+                {% if selected_account %}
+                    Счет: <span class="text-primary">{{ selected_account.name }}</span>.
+                {% endif %}
+            {% endif %}
+        </h5>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h2>Общий баланс по валютам</h2>
+            {% if total_balance_by_currency %}
+                <ul class="list-group mb-4">
+                {% for currency, balance in total_balance_by_currency.items() %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ currency }}
+                        <span class="badge badge-primary badge-pill">{{ "%.2f"|format(balance) }}</span>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p>Нет данных о счетах.</p>
+            {% endif %}
+
+            <h2>Сводка по долгам</h2>
+            {% if debt_summary %}
+                <h4>Я должен:</h4>
+                {% if debt_summary.total_i_owe %}
+                    <ul class="list-group mb-3">
+                    {% for currency, amount in debt_summary.total_i_owe.items() %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            {{ currency }}
+                            <span class="badge badge-danger badge-pill">{{ "%.2f"|format(amount) }}</span>
+                        </li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>Нет активных долгов, по которым вы должны.</p>
+                {% endif %}
+
+                <h4>Мне должны:</h4>
+                 {% if debt_summary.total_owed_to_me %}
+                    <ul class="list-group mb-3">
+                    {% for currency, amount in debt_summary.total_owed_to_me.items() %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            {{ currency }}
+                            <span class="badge badge-success badge-pill">{{ "%.2f"|format(amount) }}</span>
+                        </li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>Нет активных долгов, по которым вам должны.</p>
+                {% endif %}
+            {% else %}
+                 <p>Нет данных по долгам.</p>
+            {% endif %}
+        </div>
+
+        <div class="col-md-6">
+            <h2>Финансовая сводка</h2>
+            {% if financial_summary %}
+                <h4>Доходы по категориям:</h4>
+                {% if financial_summary.income_by_category %}
+                    <ul class="list-group mb-3">
+                    {% for item in financial_summary.income_by_category %}
+                        <li class="list-group-item">{{ item.category }}: {{ "%.2f"|format(item.total_amount) }} {{ item.currency }}</li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>Нет доходов за период.</p>
+                {% endif %}
+                <strong>Всего доходов:</strong>
+                {% for currency, total in financial_summary.total_income.items() %}
+                   {{ "%.2f"|format(total) }} {{ currency }}{% if not loop.last %}, {% endif %}
+                {% else %} 0 {% endfor %}<br><br>
+
+
+                <h4>Расходы по категориям:</h4>
+                {% if financial_summary.expense_by_category %}
+                     <ul class="list-group mb-3">
+                    {% for item in financial_summary.expense_by_category %}
+                        <li class="list-group-item">{{ item.category }}: {{ "%.2f"|format(item.total_amount) }} {{ item.currency }}</li>
+                    {% endfor %}
+                    </ul>
+                {% else %}
+                    <p>Нет расходов за период.</p>
+                {% endif %}
+                 <strong>Всего расходов:</strong>
+                {% for currency, total in financial_summary.total_expense.items() %}
+                   {{ "%.2f"|format(total) }} {{ currency }}{% if not loop.last %}, {% endif %}
+                {% else %} 0 {% endfor %}<br><br>
+
+                <h4>Чистый поток:</h4>
+                {% for currency, total in financial_summary.net_flow.items() %}
+                   <strong class="{{'text-success' if total >= 0 else 'text-danger'}}">{{ "%.2f"|format(total) }} {{ currency }}</strong>{% if not loop.last %}, {% endif %}
+                {% else %} 0 {% endfor %}<br>
+            {% else %}
+                <p>Нет данных для финансовой сводки.</p>
+            {% endif %}
+
+            <h4 class="mt-4">Кэшбэк за период:</h4>
+            {% if financial_summary.total_cashback_period %}
+                <ul class="list-group mb-3">
+                {% for currency, total in financial_summary.total_cashback_period.items() %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ currency }} <span class="badge badge-success badge-pill">{{ "%.2f"|format(total) }}</span>
+                    </li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p>Нет данных о кэшбэке за выбранный период.</p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

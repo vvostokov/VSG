@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Мои Долги{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2">Мои Долги</h1>
+        <div class="btn-toolbar mb-2 mb-md-0">
+            <a href="{{ url_for('ui_add_debt_form') }}" class="btn btn-sm btn-outline-info">
+                Добавить долг
+            </a>
+        </div>
+    </div>
+
+    {% if debts %}
+        <div class="table-responsive">
+            <table class="table table-striped table-sm">
+                <thead>
+                    <tr>
+                        <th>Тип</th>
+                        <th>Контрагент</th>
+                        <th>Сумма (исх.)</th>
+                        <th>Погашено</th>
+                        <th>Остаток</th>
+                        <th>Валюта</th>
+                        <th>Статус</th>
+                        <th>Срок до</th>
+                        <th>Описание</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for debt in debts %}
+                    <tr class="{{ 'table-warning' if debt.debt_type == 'i_owe' and debt.status != 'repaid' else ('table-info' if debt.debt_type == 'owed_to_me' and debt.status != 'repaid' else '') }}">
+                        <td>
+                            {% if debt.debt_type == 'i_owe' %}Я должен
+                            {% elif debt.debt_type == 'owed_to_me' %}Мне должны
+                            {% endif %}
+                        </td>
+                        <td>{{ debt.counterparty }}</td>
+                        <td>{{ "%.2f"|format(debt.initial_amount) }}</td>
+                        <td>{{ "%.2f"|format(debt.repaid_amount) }}</td>
+                        <td>{{ "%.2f"|format(debt.initial_amount - debt.repaid_amount) }}</td>
+                        <td>{{ debt.currency }}</td>
+                        <td>
+                            {% if debt.status == 'active' %}Активен
+                            {% elif debt.status == 'repaid' %}Погашен
+                            {% elif debt.status == 'partially_repaid' %}Частично погашен
+                            {% elif debt.status == 'cancelled' %}Аннулирован
+                            {% else %}{{ debt.status }}
+                            {% endif %}
+                        </td>
+                        <td>{{ debt.due_date.strftime('%Y-%m-%d') if debt.due_date else '-' }}</td>
+                        <td>{{ debt.description if debt.description else '-' }}</td>
+                        <td>
+                            {% if debt.status != 'repaid' and debt.status != 'cancelled' %}
+                            <a href="{{ url_for('ui_repay_debt_form', debt_id=debt.id) }}" class="btn btn-xs btn-success">Погасить</a>
+                            {% endif %}
+                            <!-- TODO: Edit/Delete buttons -->
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p>У вас нет активных долгов. <a href="{{ url_for('ui_add_debt_form') }}">Добавить новый?</a></p>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv/
+venv/
+env/
+instance/
+finance_app.db  # Если вы используете SQLite локально
+# Другие специфичные для вашей ОС или IDE файлы

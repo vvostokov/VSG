@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить правило кэшбэка{% endblock %}
+
+{% block content %}
+    <h1 class="h2">Добавить правило кэшбэка</h1>
+    <form method="POST" action="{{ url_for('ui_add_cashback_rule_form') }}">
+        <div class="form-group">
+            <label for="name">Название правила</label>
+            <input type="text" class="form-control" id="name" name="name" required>
+        </div>
+        <div class="form-group">
+            <label for="description">Описание (необязательно)</label>
+            <textarea class="form-control" id="description" name="description" rows="2"></textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group col-md-6">
+                <label for="cashback_percentage">Процент кэшбэка (%)</label>
+                <input type="number" step="0.01" min="0.01" max="100" class="form-control" id="cashback_percentage" name="cashback_percentage" required placeholder="например, 5 для 5%">
+            </div>
+            <div class="form-group col-md-6">
+                <label for="applies_to_category_id">Применять к категории расходов</label>
+                <select class="form-control" id="applies_to_category_id" name="applies_to_category_id" required>
+                    <option value="">-- Выберите категорию --</option>
+                    {% for category in expense_categories %}
+                    <option value="{{ category.id }}">{{ category.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="credit_to_account_id">Зачислять кэшбэк на счет</label>
+            <select class="form-control" id="credit_to_account_id" name="credit_to_account_id" required>
+                <option value="">-- Выберите счет --</option>
+                {% for account in accounts %}
+                <option value="{{ account.id }}">{{ account.name }} ({{ account.currency }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+            <label class="form-check-label" for="is_active">Правило активно</label>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Создать правило</button>
+        <a href="{{ url_for('ui_cashback_rules') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+{% endblock %}
