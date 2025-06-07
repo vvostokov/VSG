@@ -4,25 +4,13 @@ from flask_migrate import Migrate
 import os 
 from datetime import datetime, timezone 
 
-app = Flask(__name__)
-# Конфигурация базы данных
-# Для Render используется DATABASE_URL, для локальной разработки - sqlite
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or 'sqlite:///finance_app.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# Для Render используется SECRET_KEY из переменных окружения, для локальной - заглушка
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_secret_key_12345' 
-db = SQLAlchemy(app)
-migrate = Migrate(app, db)
-
-# Create tables if they don't exist.
-# This is a workaround for environments like Render's free tier without shell access for `flask db upgrade`.
-# For production environments with shell access, `flask db upgrade` is the preferred method.
-# Note: db.create_all() will not perform schema migrations (e.g., adding a new column to an existing table).
-with app.app_context():
-    db.create_all()
+# Инициализируем расширения глобально, но без привязки к приложению
+db = SQLAlchemy()
+migrate = Migrate()
 
 # --- Модели ---
 class Account(db.Model):
+    __tablename__ = 'account'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
     type = db.Column(db.String(50), nullable=False) # e.g., 'bank_account', 'cash', 'credit_card'
@@ -40,6 +28,7 @@ class Account(db.Model):
         return f"<Account {self.name} ({self.balance} {self.currency})>"
 
 class Category(db.Model):
+    __tablename__ = 'category'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
     type = db.Column(db.String(10), nullable=False) # 'income' or 'expense'
@@ -53,6 +42,7 @@ class Category(db.Model):
         return f"<Category {self.name} ({self.type})>"
 
 class Debt(db.Model): # type: ignore
+     __tablename__ = 'debt'
     id = db.Column(db.Integer, primary_key=True)
     debt_type = db.Column(db.String(20), nullable=False)  # 'i_owe', 'owed_to_me'
     counterparty = db.Column(db.String(100), nullable=False)
@@ -70,6 +60,7 @@ class Debt(db.Model): # type: ignore
         return f"<Debt {self.debt_type} to/from {self.counterparty} for {self.initial_amount} {self.currency}, Status: {self.status}>"
 
 class Cashback(db.Model): # type: ignore
+    __tablename__ = 'cashback'
     id = db.Column(db.Integer, primary_key=True)
     amount = db.Column(db.Float, nullable=False)
     currency = db.Column(db.String(10), nullable=False, default='RUB')
@@ -89,6 +80,7 @@ class Cashback(db.Model): # type: ignore
         return f"<Cashback {self.amount} {self.currency} from {self.source} on {self.date_received}>"
 
 class Transaction(db.Model): # type: ignore
+    __tablename__ = 'transaction'
     id = db.Column(db.Integer, primary_key=True)
     amount = db.Column(db.Float, nullable=False)
     transaction_type = db.Column(db.String(30), nullable=False) # 'income', 'expense', 'transfer', 'debt_repayment_expense', 'debt_repayment_income'
@@ -109,6 +101,7 @@ class Transaction(db.Model): # type: ignore
 
 # Новая модель для правил кэшбэка
 class CashbackRule(db.Model): # type: ignore
+    __tablename__ = 'cashback_rule'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, unique=True)
     description = db.Column(db.String(255), nullable=True)
@@ -128,6 +121,38 @@ class CashbackRule(db.Model): # type: ignore
     def __repr__(self):
         return f"<CashbackRule '{self.name}' ({self.cashback_percentage*100}% for category ID {self.applies_to_category_id} to account ID {self.credit_to_account_id})>"
 
+# Фабрика приложений
+def create_app_instance():
+    _app = Flask(__name__)
+
+    # Конфигурация базы данных
+    # Для Render используется DATABASE_URL, для локальной разработки - sqlite
+    db_uri = os.environ.get('DATABASE_URL') or 'sqlite:///finance_app.db'
+    
+    # SQLAlchemy предпочитает 'postgresql://' вместо 'postgres://' для psycopg2
+    if db_uri and db_uri.startswith('postgres://'):
+        db_uri = db_uri.replace('postgres://', 'postgresql://', 1)
+        
+    _app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
+    _app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Для Render используется SECRET_KEY из переменных окружения, для локальной - заглушка
+    _app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_secret_key_12345' 
+
+    db.init_app(_app)
+    migrate.init_app(_app, db)
+
+    with _app.app_context():
+        # Создаем таблицы, если они не существуют.
+        # Это обходной путь для сред типа бесплатного тарифа Render без доступа к shell для `flask db upgrade`.
+        # Для продакшн сред с доступом к shell, `flask db upgrade` является предпочтительным методом.
+        # Примечание: db.create_all() не выполняет миграции схемы (например, добавление нового столбца в существующую таблицу).
+        print(f"Attempting to call db.create_all(). Using DB URI: {_app.config['SQLALCHEMY_DATABASE_URI']}")
+        db.create_all()
+        print("db.create_all() executed.")
+
+    return _app
+
+app = create_app_instance() # Создаем экземпляр приложения для использования декораторами @app.route
 
 # --- Маршруты для UI (пользовательского интерфейса) ---
 
@@ -560,7 +585,7 @@ def ui_delete_transaction(transaction_id):
     return redirect(url_for('ui_transactions'))
 
 @app.route('/ui/debts')
-def ui_debts():
+def ui_debts():фв
     debts_data = Debt.query.order_by(Debt.created_at.desc()).all()
     return render_template('debts.html', debts=debts_data)
 
