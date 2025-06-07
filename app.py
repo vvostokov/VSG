@@ -42,7 +42,7 @@ class Category(db.Model):
         return f"<Category {self.name} ({self.type})>"
 
 class Debt(db.Model): # type: ignore
-     __tablename__ = 'debt'
+    __tablename__ = 'debt'
     id = db.Column(db.Integer, primary_key=True)
     debt_type = db.Column(db.String(20), nullable=False)  # 'i_owe', 'owed_to_me'
     counterparty = db.Column(db.String(100), nullable=False)
