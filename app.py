@@ -14,6 +14,13 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'your_local_fallback_
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 
+# Create tables if they don't exist.
+# This is a workaround for environments like Render's free tier without shell access for `flask db upgrade`.
+# For production environments with shell access, `flask db upgrade` is the preferred method.
+# Note: db.create_all() will not perform schema migrations (e.g., adding a new column to an existing table).
+with app.app_context():
+    db.create_all()
+
 # --- Модели ---
 class Account(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -1060,6 +1067,9 @@ def api_add_transaction():
 
 # --- Инициализация БД и запуск приложения ---
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all() 
+    # db.create_all() has been moved to run on app initialization for services like Render
+    # For local development, if you need to re-create tables from scratch and are not using migrations for it:
+    # with app.app_context():
+    #     db.drop_all() # Be careful, this deletes all data!
+    #     db.create_all()
     app.run(debug=True)
