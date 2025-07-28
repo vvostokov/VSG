@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить платформу{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Добавить новую инвестиционную платформу</h2>
+    <hr>
+    <form method="POST" action="{{ url_for('ui_add_investment_platform_form') }}">
+        <div class="form-group">
+            <label for="name">Название платформы</label>
+            <input type="text" class="form-control" id="name" name="name" placeholder="Например, Binance" required>
+        </div>
+        <div class="form-group">
+            <label for="platform_type">Тип платформы</label>
+            <select class="form-control" id="platform_type" name="platform_type" required>
+                <option value="crypto_exchange" selected>Криптобиржа</option>
+                <option value="stock_broker">Брокер</option>
+                <option value="bank">Банк</option>
+                <option value="other">Другое</option>
+            </select>
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+            <label class="form-check-label" for="is_active">Активна</label>
+        </div>
+        <hr>
+        <h5>API Ключи (Опционально)</h5>
+        <p class="text-muted">ВНИМАНИЕ: В текущей версии ключи хранятся в небезопасном виде. Используйте только для тестов.</p>
+        <div class="form-group">
+            <label for="api_key">API Key</label>
+            <input type="text" class="form-control" id="api_key" name="api_key">
+        </div>
+        <div class="form-group">
+            <label for="api_secret">API Secret</label>
+            <input type="password" class="form-control" id="api_secret" name="api_secret">
+        </div>
+        <div class="form-group">
+            <label for="passphrase">Passphrase (если требуется)</label>
+            <input type="password" class="form-control" id="passphrase" name="passphrase">
+        </div>
+        <div class="form-group">
+            <label for="other_credentials_json">Другие данные (JSON)</label>
+            <textarea class="form-control" id="other_credentials_json" name="other_credentials_json" rows="3"></textarea>
+        </div>
+        <hr>
+        <div class="form-group">
+            <label for="notes">Заметки</label>
+            <textarea class="form-control" id="notes" name="notes" rows="4"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Добавить платформу</button>
+        <a href="{{ url_for('ui_investment_platforms') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+{% endblock %}

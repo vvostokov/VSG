@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Инвестиционные Платформы{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Инвестиционные Платформы</h2>
+        <a href="{{ url_for('main.ui_add_investment_platform_form') }}" class="btn btn-primary">Добавить платформу</a>
+    </div>
+    <hr>
+    {% if platforms %}
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>Название</th>
+                    <th>Тип</th>
+                    <th>Статус</th>
+                    <th>Последняя синхронизация</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for platform in platforms %}
+                <tr>
+                    <td><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id) }}">{{ platform.name }}</a></td>
+                    <td>
+                        {{ platform.platform_type_display }}
+                    </td>
+                    <td>
+                        {% if platform.is_active %}
+                            <span class="badge badge-success">Активна</span>
+                        {% else %}
+                            <span class="badge badge-secondary">Неактивна</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ platform.last_synced_at.strftime('%Y-%m-%d %H:%M') if platform.last_synced_at else 'Никогда' }}</td>
+                    <td>
+                        <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id) }}" class="btn btn-sm btn-info">Детали</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        <p>Вы еще не добавили ни одной инвестиционной платформы. <a href="{{ url_for('main.ui_add_investment_platform_form') }}">Добавить первую?</a></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

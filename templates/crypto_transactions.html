@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+<style>
+    #selection-summary-container {
+        position: sticky;
+        top: 56px; /* Высота навбара из base.html */
+        background-color: #f8f9fa;
+        z-index: 1020; /* Поверх других элементов */
+        border-bottom: 1px solid #dee2e6;
+        display: none; /* Скрыто по умолчанию */
+    }
+    .transaction-row { cursor: pointer; }
+    .table-sm th, .table-sm td {
+        padding: 0.4rem; /* Увеличим паддинг для лучшей читаемости */
+    }
+</style>
+{% endblock %}
+
+{% block title %}История операций с криптовалютой{% endblock %}
+
+{% macro sort_link(column, title) %}
+    {% set new_order = 'asc' if sort_by == column and order == 'desc' else 'desc' %}
+    <a href="{{ url_for('main.ui_crypto_transactions', sort_by=column, order=new_order, filter_type=filter_type, filter_platform_id=filter_platform_id, page=1) }}">
+        {{ title }}
+        {% if sort_by == column %}
+            {% if order == 'asc' %}<i class="fas fa-sort-up"></i>{% else %}<i class="fas fa-sort-down"></i>{% endif %}
+        {% endif %}
+    </a>
+{% endmacro %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>История операций с криптовалютой</h2>
+    </div>
+
+    <!-- Блок для сводки по выбранным операциям -->
+    <div id="selection-summary-container" class="card mb-4">
+        <h5 class="card-header">Сводка по выбранным операциям</h5>
+        <div id="selection-summary" class="card-body p-2"></div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Фильтры</h5>
+            <form method="GET" action="{{ url_for('main.ui_crypto_transactions') }}" class="row align-items-end"> <!-- Changed form-row to row for BS4/5 compatibility -->
+                <div class="form-group col-md-4">
+                    <label for="filter_platform_id">Платформа</label>
+                    <select name="filter_platform_id" id="filter_platform_id" class="form-control">
+                        <option value="all">Все платформы</option>
+                        {% for p in platforms %}
+                        <option value="{{ p.id }}" {% if filter_platform_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-md-4">
+                    <label for="filter_type">Тип транзакции</label>
+                    <select name="filter_type" id="filter_type" class="form-control">
+                        <option value="all">Все типы</option>
+                        {% for tx_type in unique_transaction_types %}
+                        <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type|capitalize }}</option> <!-- Capitalize for display -->
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-md-2">
+                    <button type="submit" class="btn btn-primary btn-block">Применить</button>
+                </div>
+                <div class="form-group col-md-2">
+                    <a href="{{ url_for('main.ui_crypto_transactions') }}" class="btn btn-secondary btn-block">Сбросить</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th style="width: 30px;"><input type="checkbox" id="select-all" title="Выбрать все на странице"></th>
+                    <th>{{ sort_link('timestamp', 'Дата') }}</th>
+                    <th>Платформа</th>
+                    <th>{{ sort_link('type', 'Тип') }}</th>
+                    <th>{{ sort_link('asset1_ticker', 'Актив 1') }}</th>
+                    <th class="text-end">Кол-во 1</th>
+                    <th>{{ sort_link('asset2_ticker', 'Актив 2') }}</th>
+                    <th class="text-end">Кол-во 2</th>
+                    <th class="text-end">Цена исп.</th>
+                    <th>Комиссия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in transactions %}
+                {% set badge_map = {
+                    'buy': 'badge-success',
+                    'sell': 'badge-danger',
+                    'deposit': 'badge-info',
+                    'withdrawal': 'badge-warning',
+                    'transfer': 'badge-secondary'
+                } %}
+                <tr class="transaction-row"
+                    data-type="{{ tx.type }}"
+                    data-pair="{{ tx.asset1_ticker }}/{{ tx.asset2_ticker or '' }}"
+                    data-asset1-amount="{{ tx.asset1_amount|trim_zeros if tx.asset1_amount is not none else '0' }}"
+                    data-asset2-amount="{{ tx.asset2_amount|trim_zeros if tx.asset2_amount is not none else '0' }}"
+                    data-asset1-ticker="{{ tx.asset1_ticker }}"
+                    data-asset2-ticker="{{ tx.asset2_ticker or '' }}">
+                    <td><input type="checkbox" class="tx-selector"></td>
+                    <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=tx.platform.id) }}">{{ tx.platform.name }}</a></td>
+                    <td class="text-center">
+                        <span class="badge badge-pill {{ badge_map.get(tx.type, 'badge-light') }}">{{ tx.type|capitalize }}</span>
+                        {% if tx.raw_type and tx.raw_type|lower != tx.type|lower %}
+                        <small class="text-muted d-block">({{ tx.raw_type }})</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ tx.asset1_ticker }}</td>
+                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}</td>
+                    <td>{{ tx.asset2_ticker or '-' }}</td>
+                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }}</td>
+                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
+                    <td class="text-monospace">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10" class="text-center">Транзакции не найдены.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if pagination and pagination.pages > 1 %}
+        <nav aria-label="Навигация по транзакциям">
+            <ul class="pagination justify-content-center">
+                {% set base_args = {'sort_by': sort_by, 'order': order, 'filter_type': filter_type, 'filter_platform_id': filter_platform_id} %}
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=pagination.prev_num, **base_args) }}">&laquo;</a>
+                </li>
+                {% for p in pagination.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=p, **base_args) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=pagination.next_num, **base_args) }}">&raquo;</a>
+                </li>
+            </ul>
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAllCheckbox = document.getElementById('select-all');
+    const itemCheckboxes = document.querySelectorAll('.tx-selector');
+    const summaryContainer = document.getElementById('selection-summary');
+    const summaryPanel = document.getElementById('selection-summary-container');
+    const transactionRows = document.querySelectorAll('.transaction-row');
+
+    function formatNumber(num, maxDecimals = 8) {
+        if (isNaN(num) || num === null) return '0';
+        // Handle very small numbers that might be in scientific notation
+        if (Math.abs(num) < 1e-6) {
+            return Number(num).toExponential(4);
+        }
+        // Округляем до maxDecimals, затем убираем незначащие нули
+        const fixed = Number(num).toFixed(maxDecimals);
+        const parts = fixed.replace(/\.?0+$/, '').split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        return parts.join('.');
+    }
+
+    function updateSummary() {
+        const selectedRows = document.querySelectorAll('.tx-selector:checked');
+
+        if (selectedRows.length === 0) {
+            summaryPanel.style.display = 'none';
+            return;
+        }
+
+        const summaryData = {}; // { "BTC/USDT": { "buy": {...}, "sell": {...} } }
+
+        selectedRows.forEach(cb => {
+            const row = cb.closest('.transaction-row');
+            const type = row.dataset.type;
+
+            if (type !== 'buy' && type !== 'sell') {
+                return; // Считаем только покупки и продажи
+            }
+
+            const pair = row.dataset.pair;
+            const asset1Amount = parseFloat(row.dataset.asset1Amount);
+            const asset2Amount = parseFloat(row.dataset.asset2Amount);
+            const asset1Ticker = row.dataset.asset1Ticker;
+            const asset2Ticker = row.dataset.asset2Ticker;
+
+            if (!summaryData[pair]) {
+                summaryData[pair] = {};
+            }
+            if (!summaryData[pair][type]) {
+                summaryData[pair][type] = {
+                    totalAsset1: 0,
+                    totalAsset2: 0,
+                    count: 0,
+                    asset1Ticker: asset1Ticker,
+                    asset2Ticker: asset2Ticker
+                };
+            }
+
+            summaryData[pair][type].totalAsset1 += asset1Amount;
+            summaryData[pair][type].totalAsset2 += asset2Amount;
+            summaryData[pair][type].count += 1;
+        });
+
+        if (Object.keys(summaryData).length === 0) {
+            summaryPanel.style.display = 'none';
+            return;
+        }
+
+        let summaryHtml = `
+            <table class="table table-sm table-bordered mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Тип</th>
+                        <th>Пара</th>
+                        <th>Кол-во операций</th>
+                        <th>Суммарный объем</th>
+                        <th>Суммарная стоимость</th>
+                        <th>Средняя цена</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        for (const pair in summaryData) {
+            for (const type in summaryData[pair]) {
+                const data = summaryData[pair][type];
+                const avgPrice = data.totalAsset1 > 0 ? data.totalAsset2 / data.totalAsset1 : 0;
+                const typeClass = type === 'buy' ? 'text-success' : 'text-danger';
+
+                summaryHtml += `
+                    <tr>
+                        <td class="${typeClass} font-weight-bold">${type === 'buy' ? 'Покупка' : 'Продажа'}</td>
+                        <td><strong>${pair}</strong></td>
+                        <td>${data.count}</td>
+                        <td class="text-monospace">${formatNumber(data.totalAsset1)} ${data.asset1Ticker}</td>
+                        <td class="text-monospace">${formatNumber(data.totalAsset2, 2)} ${data.asset2Ticker}</td>
+                        <td class="text-monospace">${formatNumber(avgPrice, 4)} ${data.asset2Ticker}</td>
+                    </tr>
+                `;
+            }
+        }
+
+        summaryHtml += '</tbody></table>';
+        summaryContainer.innerHTML = summaryHtml;
+        summaryPanel.style.display = 'block';
+    }
+
+    // Обработчик для "Выбрать все"
+    selectAllCheckbox.addEventListener('change', function(e) {
+        itemCheckboxes.forEach(cb => {
+            cb.checked = e.target.checked;
+        });
+        updateSummary();
+    });
+
+    // Обработчики для отдельных чекбоксов
+    itemCheckboxes.forEach(cb => {
+        cb.addEventListener('change', updateSummary);
+    });
+
+    // Обработчик для клика по строке (улучшение UX)
+    transactionRows.forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Не перехватываем клики по ссылкам или самим чекбоксам
+            if (e.target.tagName === 'A' || e.target.tagName === 'INPUT') {
+                return;
+            }
+            const cb = row.querySelector('.tx-selector');
+            cb.checked = !cb.checked;
+            // Вручную вызываем событие change, чтобы обновить сводку
+            cb.dispatchEvent(new Event('change'));
+        });
+    });
+});
+</script>
+{% endblock %}

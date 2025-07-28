@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>{{ title }}</h2>
+    <hr>
+    <form action="{{ url_for(request.endpoint, debt_id=debt.id if debt else None) }}" method="POST">
+        <div class="form-group">
+            <label>Тип долга *</label>
+            <div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="debt_type" id="i_owe" value="i_owe" {% if not debt or debt.debt_type == 'i_owe' %}checked{% endif %} required>
+                    <label class="form-check-label" for="i_owe">Я должен</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="debt_type" id="owed_to_me" value="owed_to_me" {% if debt and debt.debt_type == 'owed_to_me' %}checked{% endif %} required>
+                    <label class="form-check-label" for="owed_to_me">Мне должны</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="counterparty">Контрагент (кому/кто) *</label>
+            <input type="text" class="form-control" id="counterparty" name="counterparty" value="{{ debt.counterparty if debt else '' }}" required>
+        </div>
+
+        <div class="row">
+            <div class="form-group col-md-6">
+                <label for="initial_amount">Сумма *</label>
+                <input type="number" step="0.01" class="form-control" id="initial_amount" name="initial_amount" value="{{ debt.initial_amount if debt else '' }}" required>
+            </div>
+            <div class="form-group col-md-6">
+                <label for="currency">Валюта *</label>
+                <select class="form-control" id="currency" name="currency" required>
+                    <option value="RUB" {% if debt and debt.currency == 'RUB' %}selected{% endif %}>RUB</option>
+                    <option value="USD" {% if debt and debt.currency == 'USD' %}selected{% endif %}>USD</option>
+                    <option value="EUR" {% if debt and debt.currency == 'EUR' %}selected{% endif %}>EUR</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="due_date">Срок погашения</label>
+            <input type="date" class="form-control" id="due_date" name="due_date" value="{{ debt.due_date.strftime('%Y-%m-%d') if debt and debt.due_date else '' }}">
+        </div>
+
+        <div class="form-group">
+            <label for="notes">Описание</label>
+            <textarea class="form-control" id="notes" name="notes" rows="3">{{ debt.description if debt else '' }}</textarea>
+        </div>
+
+        {% if debt %}
+        <div class="form-group">
+            <label for="status">Статус</label>
+            <select class="form-control" id="status" name="status">
+                <option value="active" {% if debt.status == 'active' %}selected{% endif %}>Активен</option>
+                <option value="repaid" {% if debt.status == 'repaid' %}selected{% endif %}>Погашен</option>
+                <option value="cancelled" {% if debt.status == 'cancelled' %}selected{% endif %}>Отменен</option>
+            </select>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-success">Сохранить</button>
+        <a href="{{ url_for('main.ui_debts') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить актив на {{ platform.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Добавить актив на "{{ platform.name }}"</h1>
+</div>
+
+<form method="POST" action="{{ url_for('securities.ui_add_security_asset_form', platform_id=platform.id) }}">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label for="ticker" class="form-label">Тикер</label>
+                <input type="text" class="form-control" id="ticker" name="ticker" value="{{ current_data.ticker or '' }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="name" class="form-label">Название актива</label>
+                <input type="text" class="form-control" id="name" name="name" value="{{ current_data.name or '' }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="asset_type" class="form-label">Тип актива</label>
+                <select class="form-select" id="asset_type" name="asset_type">
+                    <option value="stock" {% if (current_data.asset_type or 'stock') == 'stock' %}selected{% endif %}>Акция</option>
+                    <option value="bond" {% if current_data.asset_type == 'bond' %}selected{% endif %}>Облигация</option>
+                    <option value="fund" {% if current_data.asset_type == 'fund' %}selected{% endif %}>Фонд (ETF/БПИФ)</option>
+                    <option value="other" {% if current_data.asset_type == 'other' %}selected{% endif %}>Другое</option>
+                </select>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label for="quantity" class="form-label">Количество (шт.)</label>
+                <input type="text" class="form-control" id="quantity" name="quantity" value="{{ current_data.quantity or '' }}" required placeholder="Например: 10.0">
+            </div>
+            <div class="mb-3">
+                <label for="current_price" class="form-label">Текущая цена за 1 шт.</label>
+                <input type="text" class="form-control" id="current_price" name="current_price" value="{{ current_data.current_price or '' }}" placeholder="Например: 2500.50">
+                <div class="form-text">Оставьте поле пустым для автоматической загрузки цены с MOEX.</div>
+            </div>
+            <div class="mb-3">
+                <label for="currency_of_price" class="form-label">Валюта цены</label>
+                <select class="form-select" id="currency_of_price" name="currency_of_price">
+                    <option value="RUB" {% if (current_data.currency_of_price or 'RUB') == 'RUB' %}selected{% endif %}>RUB</option>
+                    <option value="USD" {% if current_data.currency_of_price == 'USD' %}selected{% endif %}>USD</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Добавить актив</button>
+    <a href="{{ url_for('securities.ui_broker_detail', platform_id=platform.id) }}" class="btn btn-secondary">Отмена</a>
+</form>
+{% endblock %}

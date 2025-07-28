@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}История операций с ценными бумагами{% endblock %}
+
+{% macro sort_link(column, title) %}
+    {% set new_order = 'asc' if sort_by == column and order == 'desc' else 'desc' %}
+    <a href="{{ url_for('securities.ui_securities_transactions', sort_by=column, order=new_order, filter_platform_id=filter_platform_id, filter_type=filter_type, page=1) }}">
+        {{ title }}
+        {% if sort_by == column %}
+            {% if order == 'asc' %}<i class="fas fa-sort-up"></i>{% else %}<i class="fas fa-sort-down"></i>{% endif %}
+        {% endif %}
+    </a>
+{% endmacro %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>История операций с ценными бумагами</h2>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Фильтры</h5>
+            <form method="GET" class="row align-items-end">
+                <div class="form-group col-md-5">
+                    <label for="filter_platform_id">Брокер</label>
+                    <select name="filter_platform_id" id="filter_platform_id" class="form-control">
+                        <option value="all">Все брокеры</option>
+                        {% for p in platforms %}
+                        <option value="{{ p.id }}" {% if filter_platform_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-md-3">
+                    <label for="filter_type">Тип операции</label>
+                    <select name="filter_type" id="filter_type" class="form-control">
+                        <option value="all">Все типы</option>
+                        {% for tx_type in unique_transaction_types %}
+                        <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type|capitalize }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group col-md-2">
+                    <button type="submit" class="btn btn-primary btn-block">Применить</button>
+                </div>
+                <div class="form-group col-md-2">
+                    <a href="{{ url_for('securities.ui_securities_transactions') }}" class="btn btn-secondary btn-block">Сбросить</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>{{ sort_link('timestamp', 'Дата') }}</th>
+                    <th>Брокер</th>
+                    <th>{{ sort_link('type', 'Тип') }}</th>
+                    <th>{{ sort_link('asset1_ticker', 'Актив') }}</th>
+                    <th class="text-end">Кол-во</th>
+                    <th class="text-end">Цена</th>
+                    <th class="text-end">Сумма</th>
+                    <th>Комиссия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in transactions %}
+                {% set badge_map = {'buy': 'badge-success', 'sell': 'badge-danger'} %}
+                <tr>
+                    <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td><a href="{{ url_for('securities.ui_broker_detail', platform_id=tx.platform.id) }}">{{ tx.platform.name }}</a></td>
+                    <td class="text-center">
+                        <span class="badge badge-pill {{ badge_map.get(tx.type, 'badge-light') }}">{{ tx.type|capitalize }}</span>
+                    </td>
+                    <td>{{ tx.asset1_ticker }}</td>
+                    <td class="text-end text-monospace">{{ tx.asset1_amount|trim_zeros if tx.asset1_amount is not none else '-' }}</td>
+                    <td class="text-end text-monospace">{{ "%.4f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
+                    <td class="text-end text-monospace">{{ "%.2f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }} {{ tx.asset2_ticker }}</td>
+                    <td class="text-monospace">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center">Транзакции не найдены.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if pagination and pagination.pages > 1 %}
+        <nav aria-label="Навигация по транзакциям">
+            <ul class="pagination justify-content-center">
+                {% set base_args = {'sort_by': sort_by, 'order': order, 'filter_platform_id': filter_platform_id, 'filter_type': filter_type} %}
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('securities.ui_securities_transactions', page=pagination.prev_num, **base_args) }}">&laquo;</a>
+                </li>
+                {% for p in pagination.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('securities.ui_securities_transactions', page=p, **base_args) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for('securities.ui_securities_transactions', page=pagination.next_num, **base_args) }}">&raquo;</a>
+                </li>
+            </ul>
+        </nav>
+    {% endif %}
+</div>
+{% endblock %}

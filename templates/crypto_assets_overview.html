@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+
+{% macro render_change(change_value) %}
+    {% if change_value is not none %}
+        <span class="text-{{ 'success' if change_value > 0 else 'danger' }}">
+            <i class="bi bi-arrow-{{ 'up' if change_value > 0 else 'down' }}-short"></i>
+            {{ "%.2f"|format(change_value) }}%
+        </span>
+    {% else %}
+        <span class="text-muted">N/A</span>
+    {% endif %}
+{% endmacro %}
+
+{% block title %}Обзор криптоактивов{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center">
+            <h1 class="mb-0">Обзор криптоактивов</h1>
+            <form action="{{ url_for('main.ui_refresh_historical_data') }}" method="post" class="ms-3">
+                <button type="submit" class="btn btn-outline-secondary btn-sm" title="Очистить кэш и принудительно обновить исторические данные">
+                    <i class="bi bi-arrow-clockwise"></i> Обновить данные
+                </button>
+            </form>
+        </div>
+        <div class="text-end">
+            <h4>Общая стоимость</h4>
+            <h2 class="text-primary mb-1">{{ "%.2f"|format(grand_total_rub or 0) }} RUB</h2>
+            {% if grand_total_usdt %}
+            <h5 class="text-muted">{{ grand_total_usdt|trim_zeros }} USDT</h5>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-8 mb-4 mb-lg-0">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">Динамика портфеля (RUB)</h5>
+                        <form action="{{ url_for('main.ui_refresh_portfolio_history') }}" method="post">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm" title="Пересчитать историю стоимости портфеля">
+                                <i class="bi bi-arrow-clockwise"></i> Обновить график
+                            </button>
+                        </form>
+                    </div>
+                    <canvas id="portfolioHistoryChart"></canvas>
+                    {% if not chart_history_labels or chart_history_labels == '[]' %}
+                        <div class="text-center text-muted mt-3">
+                            <p>Нет данных для построения графика.</p>
+                            <p><small>Пожалуйста, убедитесь, что вы синхронизировали транзакции с ваших бирж, а затем нажмите кнопку "Обновить график".</small></p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Инвестиции по биржам</h5>
+                    {% if platform_summary %}
+                    <div class="list-group list-group-flush">
+                        {% for platform_name, data in platform_summary %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                            <span><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=data.id) }}">{{ platform_name }}</a></span>
+                            <div class="text-end">
+                                <strong class="d-block">{{ "%.2f"|format(data.total_rub) }} RUB</strong>
+                                <small class="text-muted">{{ data.total_usdt|trim_zeros }} USDT</small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted">Нет данных для отображения.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Все активы</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Актив</th>
+                                    <th class="text-end">Количество</th>
+                                    <th class="text-end">Цена</th>
+                                    <th class="text-end">Средняя цена покупки</th>
+                                    <th class="text-end">Стоимость (RUB)</th>
+                                    <th class="text-center" style="min-width: 80px;">24ч</th>
+                                    <th class="text-center" style="min-width: 80px;">7д</th>
+                                    <th class="text-center" style="min-width: 80px;">30д</th>
+                                    <th class="text-center" style="min-width: 80px;">3м</th>
+                                    <th class="text-center" style="min-width: 80px;">6м</th>
+                                    <th class="text-center" style="min-width: 80px;">1г</th>
+                                    <th></th> <!-- For expand button -->
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ticker, data in assets %}                                <tr data-toggle="collapse" href="#collapse-{{ ticker }}" role="button" aria-expanded="false" aria-controls="collapse-{{ ticker }}" style="cursor: pointer;">
+                                    <td>
+                                        <strong>{{ ticker }}</strong>
+                                    </td>
+                                    <td class="text-end">{{ "%.8f"|format(data.total_quantity)|trim_zeros }}</td>
+                                    <td class="text-end">{{ "%.4f"|format(data.current_price) }} {{ data.currency_of_price }}</td>
+                                    <td class="text-end">
+                                        {% if data.average_buy_price > 0 %}
+                                            {{ "%.4f"|format(data.average_buy_price) }} USDT
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <strong>{{ "%.2f"|format(data.total_value_rub) }} RUB</strong>
+                                    </td>
+                                    <td class="text-center">{{ render_change(data.get('24h')) }}</td>
+                                    <td class="text-center">{{ render_change(data.get('7d')) }}</td>
+                                    <td class="text-center">{{ render_change(data.get('30d')) }}</td>
+                                    <td class="text-center">{{ render_change(data.get('90d')) }}</td>
+                                    <td class="text-center">{{ render_change(data.get('180d')) }}</td>
+                                    <td class="text-center">{{ render_change(data.get('365d')) }}</td>
+                                                                        <td><i class="fas fa-chevron-down"></i></td>
+                                                                        <td><i class="bi bi-chevron-down"></i></td>
+                                </tr>                                
+                                <tr>
+                                    <td colspan="12" class="p-0" style="border: none;">
+                                        <div class="collapse" id="collapse-{{ ticker }}">
+                                            <div class="p-3 bg-light">
+                                                <h6>Размещение актива:</h6>
+                                                <ul class="list-group list-group-flush">
+                                                    {% for location in data.locations %}
+                                                    <li class="list-group-item d-flex justify-content-between align-items-center bg-light">
+                                                        <span>
+                                                            <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=location.platform_id) }}">{{ location.platform_name }}</a>
+                                                            <small class="text-muted">({{ location.account_type }})</small>
+                                                        </span>
+                                                        <span>{{ "%.8f"|format(location.quantity)|trim_zeros }} {{ ticker }}</span>
+                                                    </li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="12" class="text-center">Криптоактивы не найдены.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Распределение активов (RUB)</h5>
+                    <div style="position: relative; height:350px;">
+                        <canvas id="assetValuationChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">Годовая производительность (нормализованная)</h5>
+                            <p class="text-muted small mb-0">График показывает изменение цены за выбранный период относительно максимальной цены за тот же период.</p>
+                        </div>
+                        <div>
+                            <form id="refresh-performance-form" action="{{ url_for('main.ui_refresh_performance_chart') }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-primary" title="Обновить данные для графика производительности">
+                                    <i class="bi bi-arrow-clockwise"></i> Обновить
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    {% if performance_chart_last_updated %}
+                        <p class="text-muted small mb-2">
+                            Данные обновлены: {{ performance_chart_last_updated.strftime('%d.%m.%Y %H:%M:%S') }} UTC
+                        </p>
+                    {% elif not (performance_chart_data and performance_chart_data|length > 0) %}
+                        <div class="alert alert-info" role="alert">
+                            <i class="bi bi-info-circle"></i> Данные для графика еще не были загружены. Нажмите "Обновить", чтобы сгенерировать их в первый раз. Это может занять некоторое время.
+                        </div>
+                    {% endif %}
+
+                    <div id="performance-chart-wrapper" class="{% if not (performance_chart_data and performance_chart_data|length > 0) %}d-none{% endif %}">
+                        <div class="row mb-3">
+                            <div class="col-lg-8 mb-3 mb-lg-0">
+                                <strong>Выберите криптовалюты:</strong>
+                                <div id="crypto-checkboxes-container" class="mt-2">
+                                    <!-- Checkboxes will be generated here by JS -->
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <strong>Выберите периоды:</strong>
+                                <div id="period-checkboxes-container" class="mt-2">
+                                    <!-- Checkboxes will be generated here by JS -->
+                                </div>
+                            </div>
+                        </div>
+                        <div style="position: relative; height:450px;">
+                            <canvas id="performanceChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // --- Line Chart for Portfolio History ---
+    const historyCtx = document.getElementById('portfolioHistoryChart');
+    if (historyCtx) {
+        const historyLabels = {{ chart_history_labels|safe }};
+        const historyData = {{ chart_history_values|safe }};
+
+        if (historyLabels.length > 0) {
+            const portfolioHistoryChart = new Chart(historyCtx, {
+                type: 'line',
+                data: {
+                    labels: historyLabels,
+                    datasets: [{
+                        label: 'Общая стоимость портфеля (RUB)',
+                        data: historyData,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                tooltipFormat: 'dd.MM.yyyy',
+                                displayFormats: {
+                                    day: 'dd.MM'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Дата'
+                            }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Стоимость (RUB)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    // --- Pie Chart for Asset Distribution ---
+    const valuationCtx = document.getElementById('assetValuationChart').getContext('2d');
+    const pieChartColors = [
+        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
+        '#858796', '#5a5c69', '#fd7e14', '#6f42c1', '#20c997'
+    ];
+    const assetValuationChart = new Chart(valuationCtx, {
+        type: 'pie',
+        data: {
+            labels: {{ chart_labels|safe }},
+            datasets: [{
+                label: 'Стоимость в RUB',
+                data: {{ chart_data|safe }},
+                backgroundColor: pieChartColors,
+                borderColor: '#ffffff',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.label || '';
+                            let value = context.parsed;
+                            let total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                            let percentage = (value / total * 100).toFixed(2) + '%';
+                            let valueFormatted = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(value);
+                            
+                            label += `: ${valueFormatted} (${percentage})`;
+                            return label;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Helper to generate month-based labels for the 365-day chart
+    function generateYearLabels() {
+        const labels = [];
+        const monthNames = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"];
+        const today = new Date();
+        let lastMonth = -1;
+
+        for (let i = 364; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const currentMonth = d.getMonth();
+            
+            if (currentMonth !== lastMonth) {
+                labels.push(monthNames[currentMonth]);
+                lastMonth = currentMonth;
+            } else {
+                labels.push('');
+            }
+        }
+        return labels;
+    }
+
+    // --- Interactive Performance Chart ---
+    const performanceData = {{ performance_chart_data|safe }};
+    const performanceContainer = document.getElementById('performanceChart');
+    const cryptoCheckboxesContainer = document.getElementById('crypto-checkboxes-container');
+    const periodCheckboxesContainer = document.getElementById('period-checkboxes-container');
+
+    if (performanceContainer && cryptoCheckboxesContainer && periodCheckboxesContainer && Object.keys(performanceData).length > 0) {
+        const tickers = Object.keys(performanceData);
+        const periods = [
+            { value: '0-365', label: 'Последний год (0-365 дней)' },
+            { value: '365-730', label: 'Прошлый год (365-730 дней)' },
+            { value: '730-1095', label: 'Позапрошлый год (730-1095 дней)' }
+        ];
+        const colors = ['#0d6efd', '#dc3545', '#198754', '#ffc107', '#6f42c1', '#fd7e14', '#20c997'];
+
+        // 1. Create controls
+        tickers.forEach((ticker, index) => {
+            const div = document.createElement('div');
+            div.className = 'form-check form-check-inline';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" id="check-${ticker}" value="${ticker}" ${index < 3 ? 'checked' : ''}>
+                <label class="form-check-label" for="check-${ticker}" style="color: ${colors[index % colors.length]}; font-weight: 500;">${ticker}</label>
+            `;
+            cryptoCheckboxesContainer.appendChild(div);
+        });
+
+        periods.forEach((period, index) => {
+            const div = document.createElement('div');
+            div.className = 'form-check';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" id="check-period-${period.value}" value="${period.value}" ${index === 0 ? 'checked' : ''}>
+                <label class="form-check-label" for="check-period-${period.value}">${period.label}</label>
+            `;
+            periodCheckboxesContainer.appendChild(div);
+        });
+        
+        // 2. Initialize Chart
+        const ctx = performanceContainer.getContext('2d');
+        const performanceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: generateYearLabels(), // Use month-based labels
+                datasets: [] // will be set by updateChart
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title: function(context) { return `День ${context[0].label}`; }
+                        }
+                    },
+                    legend: { position: 'top' },
+                },
+                scales: {
+                    x: { 
+                        title: { display: true, text: 'Месяцы в периоде' },
+                        ticks: {
+                            // This will hide the empty labels, showing only month names
+                            callback: function(value, index, ticks) {
+                                return this.getLabelForValue(value) !== '' ? this.getLabelForValue(value) : null;
+                            },
+                            autoSkip: false,
+                            maxRotation: 0,
+                        }
+                    },
+                    y: {
+                        min: 0,
+                        max: 105, // A bit of padding above 100%
+                        title: { display: true, text: 'Цена (% от макс. за период)' },
+                        ticks: { callback: function(value) { return value + '%'; } }
+                    }
+                }
+            }
+        });
+        
+        // Helper to convert hex color to rgba for transparency
+        function hexToRgba(hex, alpha) {
+            let r = 0, g = 0, b = 0;
+            if (hex.length == 4) { // 3-digit hex
+                r = parseInt(hex[1] + hex[1], 16);
+                g = parseInt(hex[2] + hex[2], 16);
+                b = parseInt(hex[3] + hex[3], 16);
+            } else if (hex.length == 7) { // 6-digit hex
+                r = parseInt(hex.substring(1, 3), 16);
+                g = parseInt(hex.substring(3, 5), 16);
+                b = parseInt(hex.substring(5, 7), 16);
+            }
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+        
+        // 3. Update function
+        function updateChart() {
+            const selectedPeriods = Array.from(document.querySelectorAll('#period-checkboxes-container input:checked')).map(cb => cb.value);
+            const selectedTickers = Array.from(document.querySelectorAll('#crypto-checkboxes-container input:checked')).map(cb => cb.value);
+
+            const newDatasets = [];
+            selectedTickers.forEach((ticker) => {
+                const tickerIndex = tickers.indexOf(ticker);
+                const baseColor = colors[tickerIndex % colors.length];
+
+                selectedPeriods.forEach((periodValue) => {
+                    if (performanceData[ticker] && performanceData[ticker][periodValue]) {
+                        const periodInfo = periods.find(p => p.value === periodValue);
+                        let opacity = 1.0;
+                        if (periodValue === '365-730') opacity = 0.65;
+                        if (periodValue === '730-1095') opacity = 0.4;
+
+                        newDatasets.push({
+                            label: `${ticker} (${periodInfo.label})`,
+                            data: performanceData[ticker][periodValue],
+                            borderColor: hexToRgba(baseColor, opacity),
+                            fill: false,
+                            pointRadius: 0,
+                            borderWidth: 2,
+                            tension: 0.1
+                        });
+                    }
+                });
+            });
+
+            // Labels are now static and generated on page load, no need to update them.
+            performanceChart.data.datasets = newDatasets;
+            performanceChart.update();
+        }
+        
+        // 4. Attach event listeners
+        document.querySelectorAll('#crypto-checkboxes-container input, #period-checkboxes-container input').forEach(el => {
+            el.addEventListener('change', updateChart);
+        });
+
+        // 5. Initial chart draw
+        updateChart();
+    }
+
+    // --- Form submission loading state for Performance Chart ---
+    const refreshPerformanceForm = document.getElementById('refresh-performance-form');
+    if (refreshPerformanceForm) {
+        refreshPerformanceForm.addEventListener('submit', function() {
+            const button = this.querySelector('button[type="submit"]');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Обновление...';
+            }
+        });
+    }
+    });
+</script>
+{% endblock %}

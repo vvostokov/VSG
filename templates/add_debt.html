@@ -3,29 +3,31 @@
 {% block title %}Добавить новый долг{% endblock %}
 
 {% block content %}
-    <h1 class="h2">Добавить новый долг</h1>
+<div class="container mt-4">
+    <h2>Добавить новый долг</h2>
+    <hr>
     <form method="POST" action="{{ url_for('ui_add_debt_form') }}">
         <div class="form-row">
             <div class="form-group col-md-6">
                 <label for="debt_type">Тип долга</label>
                 <select class="form-control" id="debt_type" name="debt_type" required>
-                    <option value="i_owe">Я должен</option>
+                    <option value="i_owe" selected>Я должен</option>
                     <option value="owed_to_me">Мне должны</option>
                 </select>
             </div>
             <div class="form-group col-md-6">
                 <label for="counterparty">Контрагент (Кому / От кого)</label>
-                <input type="text" class="form-control" id="counterparty" name="counterparty" required>
+                <input type="text" class="form-control" id="counterparty" name="counterparty" placeholder="Например, Иван Петров" required>
             </div>
         </div>
         <div class="form-row">
             <div class="form-group col-md-6">
                 <label for="initial_amount">Сумма</label>
-                <input type="number" step="0.01" class="form-control" id="initial_amount" name="initial_amount" required>
+                <input type="number" step="0.01" class="form-control" id="initial_amount" name="initial_amount" placeholder="1000.00" required>
             </div>
             <div class="form-group col-md-6">
                 <label for="currency">Валюта</label>
-                <input type="text" class="form-control" id="currency" name="currency" value="RUB" maxlength="3">
+                <input type="text" class="form-control" id="currency" name="currency" value="RUB" required>
             </div>
         </div>
         <div class="form-group">
@@ -34,9 +36,10 @@
         </div>
         <div class="form-group">
             <label for="description">Описание</label>
-            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+            <textarea class="form-control" id="description" name="description" rows="3" placeholder="Например, долг за обед"></textarea>
         </div>
         <button type="submit" class="btn btn-primary">Добавить долг</button>
         <a href="{{ url_for('ui_debts') }}" class="btn btn-secondary">Отмена</a>
     </form>
+</div>
 {% endblock %}

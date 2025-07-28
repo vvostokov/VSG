@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Брокерские счета{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Брокерские счета</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <a href="{{ url_for('main.ui_add_investment_platform_form') }}" class="btn btn-sm btn-outline-primary">
+            <i class="fas fa-plus"></i> Добавить брокера
+        </a>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-striped table-sm">
+        <thead>
+            <tr>
+                <th>Название</th>
+                <th>Тип</th>
+                <th>Заметки</th>
+                <th>Статус</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for platform in platforms %}
+            <tr>
+                <td><a href="{{ url_for('securities.ui_broker_detail', platform_id=platform.id) }}">{{ platform.name }}</a></td>
+                <td>{{ platform.platform_type_display }}</td>
+                <td>{{ platform.notes or '' }}</td>
+                <td>
+                    {% if platform.is_active %}
+                        <span class="badge bg-success">Активен</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Неактивен</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('main.ui_edit_investment_platform_form', platform_id=platform.id) }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="fas fa-edit"></i>
+                    </a>
+                    <form action="{{ url_for('main.ui_delete_investment_platform', platform_id=platform.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Вы уверены, что хотите удалить платформу {{ platform.name }} и все связанные с ней данные?');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="text-center">Брокерские счета не найдены. <a href="{{ url_for('main.ui_add_investment_platform_form') }}">Добавьте новый.</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

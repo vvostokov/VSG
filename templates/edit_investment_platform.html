@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать: {{ platform.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Редактировать инвестиционную платформу: {{ platform.name }}</h2>
+    <hr>
+    <form method="POST" action="{{ url_for('main.ui_edit_investment_platform_form', platform_id=platform.id) }}">
+        <div class="form-group">
+            <label for="name">Название платформы</label>
+            <input type="text" class="form-control" id="name" name="name" value="{{ platform.name }}" required>
+        </div>
+        <div class="form-group">
+            <label for="platform_type">Тип платформы</label>
+            <select class="form-control" id="platform_type" name="platform_type" required>
+                <option value="crypto_exchange" {% if platform.platform_type == 'crypto_exchange' %}selected{% endif %}>Криптобиржа</option>
+                <option value="stock_broker" {% if platform.platform_type == 'stock_broker' %}selected{% endif %}>Брокер</option>
+                <option value="bank" {% if platform.platform_type == 'bank' %}selected{% endif %}>Банк</option>
+                <option value="other" {% if platform.platform_type == 'other' %}selected{% endif %}>Другое</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="api_key">API Key</label>
+            <input type="text" class="form-control" id="api_key" name="api_key" value="{{ platform.api_key or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="api_secret">API Secret</label>
+            <input type="password" class="form-control" id="api_secret" name="api_secret" value="{{ platform.api_secret_encrypted or '' }}">
+        </div>
+        <div class="form-group">
+            <label for="passphrase">Passphrase (если требуется)</label>
+            <input type="password" class="form-control" id="passphrase" name="passphrase" value="{{ platform.passphrase_encrypted or '' }}"> {# Keep as password type #}
+        </div>
+        <div class="form-group">
+            <label for="manual_earn_balances_input">Ручные Earn Балансы (JSON)</label>
+            <textarea class="form-control" id="manual_earn_balances_input" name="manual_earn_balances_input" rows="5" placeholder='{"BTC": "0.01", "USDT": "100.50"}'>{{ platform.manual_earn_balances_json or '{}' }}</textarea>
+            <small class="form-text text-muted">Введите балансы в формате JSON: {"TICKER": "QUANTITY"}. Например: {"BTC": "0.01", "USDT": "100.50"}</small>
+        </div>
+        <div class="form-group">
+            <label for="other_credentials_json">Другие данные (JSON)</label>
+            <textarea class="form-control" id="other_credentials_json" name="other_credentials_json" rows="3">{{ platform.other_credentials_json_encrypted or '' }}</textarea>
+        </div>
+        <hr>
+        <div class="form-group">
+            <label for="notes">Заметки</label>
+            <textarea class="form-control" id="notes" name="notes" rows="3">{{ platform.notes or '' }}</textarea>
+        </div>
+        <div class="form-group form-check">
+            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" {% if platform.is_active %}checked{% endif %}>
+            <label class="form-check-label" for="is_active">Активна</label>
+       </div>
+
+        <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+        <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id) }}" class="btn btn-secondary">Отмена</a>
+    </form>
+</div>
+{% endblock %}

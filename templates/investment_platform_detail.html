@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block title %}Детали: {{ platform.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>{{ platform.name }} <small class="text-muted">({{ platform.platform_type }})</small></h2>
+        <div>
+            <a href="{{ url_for('main.ui_edit_investment_platform_form', platform_id=platform.id) }}" class="btn btn-primary">Редактировать</a>
+            <form action="{{ url_for('main.ui_sync_investment_platform', platform_id=platform.id) }}" method="POST" style="display: inline-block;">
+                <button type="submit" class="btn btn-info">Синхр. балансы</button>
+            </form>
+            <form action="{{ url_for('main.ui_sync_investment_platform_transactions', platform_id=platform.id) }}" method="POST" style="display: inline-block;">
+                 <button type="submit" class="btn btn-secondary">Синхр. транзакции</button>
+            </form>
+            <form action="{{ url_for('main.ui_delete_investment_platform', platform_id=platform.id) }}" method="POST" style="display: inline-block;" onsubmit="return confirm('Вы уверены, что хотите удалить платформу \'{{ platform.name }}\' и все связанные с ней данные?');">
+                <button type="submit" class="btn btn-danger">Удалить</button>
+            </form>
+        </div>
+    </div>
+    <hr>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4>Активы на платформе ({{ "%.2f"|format(platform_total_value_rub) }} RUB)</h4>
+                <h3>
+    Общая стоимость на платформе: {{ platform_total_value_rub|round(2) }} RUB / {{ platform_total_value_usdt|trim_zeros }} USDT
+</h3>
+                <a href="{{ url_for('main.ui_add_investment_asset_form', platform_id=platform.id) }}" class="btn btn-success btn-sm">Добавить актив вручную</a>
+            </div>
+            {% if valued_assets %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Тикер</th>
+                            <th>Тип кошелька</th>
+                            <th class="text-right">Кол-во</th>
+                            <th class="text-right">Цена</th>
+                            <th class="text-right">Стоимость (RUB)</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in valued_assets %}
+                        <tr>
+                            <td><strong>{{ item.asset.ticker }}</strong></td>
+                            <td><span class="badge badge-info">{{ item.asset.source_account_type or 'N/A' }}</span></td>
+                            <td class="text-right">{{ "%.6f"|format(item.asset.quantity or 0) }}</td>
+                            <td class="text-right">{{ "%.4f"|format(item.asset.current_price or 0) }} {{ item.asset.currency_of_price or 'N/A' }}</td>
+                            <td class="text-right">{{ "%.2f"|format(item.value_rub) }}</td>
+                            <td>
+                                 {% if item.asset.id %}
+                                <a href="{{ url_for('main.ui_edit_investment_asset', asset_id=item.asset.id) }}" class="btn btn-xs btn-outline-primary">Ред.</a>
+                                <form action="{{ url_for('main.ui_delete_investment_asset', asset_id=item.asset.id) }}" method="POST" style="display: inline-block;" onsubmit="return confirm('Удалить актив {{ item.asset.ticker }}?');">
+                                    <button type="submit" class="btn btn-xs btn-outline-danger">Удал.</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <p>Активы для этой платформы еще не загружены. Попробуйте <a href="#" onclick="document.querySelector('form[action*=\'sync\'] button').click(); return false;">синхронизировать</a> данные.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="row mt-3">
+        <div class="col-md-6">
+            <h4>Балансы по типам кошельков</h4>
+            {% if account_type_summary %}
+            <ul class="list-group">
+                {% for account_type, total_value in account_type_summary %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    {{ account_type }}
+                    <span class="badge badge-primary badge-pill">{{ "{:,.2f}".format(total_value) }} RUB</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>Нет данных для отображения.</p>
+            {% endif %}
+        </div>
+    </div>
+    <div class="row mt-4">
+        <div class="col-md-12">
+                        <h4>Последние транзакции</h4> {# Заголовок таблицы #}
+
+            {# Фильтр по типу транзакции #}
+            <div class="mb-3">
+                <form method="GET" class="form-inline">
+                    <label for="filter_type" class="mr-2">Фильтр по типу:</label>
+                    <select name="filter_type" id="filter_type" class="form-control form-control-sm mr-2" onchange="this.form.submit()">
+                        <option value="all" {% if filter_type == 'all' %}selected{% endif %}>Все типы</option>
+                        {% for tx_type in unique_transaction_types %}
+                        <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type }}</option>
+                        {% endfor %}
+                    </select>
+                    {# Передаем текущие параметры сортировки, чтобы они не сбрасывались при фильтрации #}
+                    <input type="hidden" name="sort_by" value="{{ sort_by }}">
+                    <input type="hidden" name="order" value="{{ order }}">
+                    {# Сбрасываем страницу на 1 при изменении фильтра #}
+                    <input type="hidden" name="page" value="1">
+                </form>
+            </div>
+            {% if platform_transactions %}
+            <div class="table-responsive">
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th> {# Сортировка по дате #}
+                                <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=1, sort_by='timestamp', order='asc' if order == 'desc' else 'desc', filter_type=filter_type) }}">
+                                    Дата
+                                    {% if sort_by == 'timestamp' %}
+                                        {% if order == 'asc' %}&uarr;{% else %}&darr;{% endif %}
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th> {# Сортировка по типу #}
+                                <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=1, sort_by='type', order='asc' if order == 'desc' else 'desc', filter_type=filter_type) }}">
+                                    Тип
+                                    {% if sort_by == 'type' %}
+                                        {% if order == 'asc' %}&uarr;{% else %}&darr;{% endif %}
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th> {# Сортировка по Активу 1 #}
+                                <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=1, sort_by='asset1_ticker', order='asc' if order == 'desc' else 'desc', filter_type=filter_type) }}">
+                                    Актив 1
+                                    {% if sort_by == 'asset1_ticker' %}
+                                        {% if order == 'asc' %}&uarr;{% else %}&darr;{% endif %}
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th class="text-right">Кол-во 1</th>
+                            <th>Актив 2</th>
+                            <th class="text-right">Кол-во 2</th>
+                            <th class="text-right">Цена исп.</th> {# Новый заголовок столбца #}
+                            <th>Комиссия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tx in platform_transactions %}
+                        <tr>
+                            <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ tx.type }} <small class="text-muted">({{ tx.raw_type }})</small></td>
+                            <td>{{ tx.asset1_ticker }}</td>
+                            <td class="text-right">{{ "%.8f"|format(tx.asset1_amount) if tx.asset1_amount is not none else '-' }}</td>
+                            <td>{{ tx.asset2_ticker or '-' }}</td>
+                            <td class="text-right">{{ "%.8f"|format(tx.asset2_amount) if tx.asset2_amount is not none else '-' }}</td> {# Количество 2 #}
+                            <td class="text-right">{{ "%.8f"|format(tx.execution_price) if tx.execution_price is not none else '-' }}</td> {# Значение цены исполнения #}
+                            <td>{{ ("%.8f"|format(tx.fee_amount) ~ ' ' ~ tx.fee_currency) if tx.fee_amount is not none else '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if transactions_pagination and transactions_pagination.pages > 1 %}
+                <nav aria-label="Навигация по транзакциям">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item {% if not transactions_pagination.has_prev %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=transactions_pagination.prev_num) }}" aria-label="Previous"><span aria-hidden="true">&laquo;</span></a>
+                        </li>
+                        {% for p in transactions_pagination.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
+                            {% if p %}
+                                <li class="page-item {% if p == transactions_pagination.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=p) }}">{{ p }}</a>
+                                </li>
+                            {% else %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                            {% endif %}
+                        {% endfor %}
+                        <li class="page-item {% if not transactions_pagination.has_next %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('main.ui_investment_platform_detail', platform_id=platform.id, page=transactions_pagination.next_num) }}" aria-label="Next"><span aria-hidden="true">&raquo;</span></a>
+                        </li>
+                    </ul>
+                </nav>
+            {% endif %}    
+            {% else %}
+            <p>Нет данных о транзакциях.</p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

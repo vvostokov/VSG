@@ -7,44 +7,62 @@
     <title>{% block title %}Финансовый Помощник{% endblock %}</title>
     <!-- Можно подключить CSS фреймворк, например, Bootstrap для стилизации -->
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <style>
         body { padding-top: 5rem; }
         .nav-link { color: #007bff; }
         .nav-link.active { font-weight: bold; }
     </style>
+    {% block head_extra %}{% endblock %}
 </head>
 <body>
     <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
-        <a class="navbar-brand" href="{{ url_for('index') }}">ФинПомощник</a>
+        <a class="navbar-brand" href="{{ url_for('main.index') }}">ФинПомощник</a>
         <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarsExampleDefault" aria-controls="navbarsExampleDefault" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
 
         <div class="collapse navbar-collapse" id="navbarsExampleDefault">
             <ul class="navbar-nav mr-auto">
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">Главная</a>
+                <li class="nav-item {% if request.endpoint == 'main.index' %}active{% endif %}">
+                    <a class="nav-link" href="{{ url_for('main.index') }}">Главная</a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_accounts' %}active{% endif %}" href="{{ url_for('ui_accounts') }}">Счета</a>
+                {% set banking_endpoints = ['main.ui_accounts', 'main.ui_add_account_form', 'main.ui_edit_account_form', 'main.ui_transactions', 'main.ui_add_transaction_form', 'main.ui_edit_transaction_form', 'main.ui_debts', 'main.ui_add_debt_form', 'main.ui_repay_debt_form', 'main.ui_analytics_overview', 'main.ui_cashback_rules', 'main.ui_add_cashback_rule_form', 'main.ui_edit_cashback_rule_form', 'main.ui_categories', 'main.ui_add_category_form', 'main.ui_edit_category_form'] %}
+                <li class="nav-item dropdown {% if request.endpoint in banking_endpoints %}active{% endif %}">
+                    <a class="nav-link dropdown-toggle" href="#" id="bankingDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Банкинг
+                    </a>
+                    <div class="dropdown-menu" aria-labelledby="bankingDropdown">
+                        <a class="dropdown-item" href="{{ url_for('main.ui_accounts') }}">Счета</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_transactions') }}">Банковские операции</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_categories') }}">Категории</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_debts') }}">Долги</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_cashback_rules') }}">Правила кэшбэка</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_analytics_overview') }}">Аналитика</a>
+                    </div></li>
+                 {% set crypto_endpoints = ['main.ui_investment_platforms', 'main.ui_investment_platform_detail', 'main.ui_add_investment_platform_form', 'main.ui_edit_investment_platform_form', 'main.ui_crypto_assets', 'main.ui_crypto_transactions'] %}
+                <li class="nav-item dropdown {% if request.endpoint in crypto_endpoints %}active{% endif %}">
+                    <a class="nav-link dropdown-toggle" href="#" id="cryptoDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Криптовалюты
+                    </a>
+                    <div class="dropdown-menu" aria-labelledby="cryptoDropdown">
+                        <a class="dropdown-item" href="{{ url_for('main.ui_investment_platforms') }}">Биржи/Платформы</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_crypto_assets') }}">Активы</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_crypto_transactions') }}">История операций</a>
+                    </div>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_transactions' %}active{% endif %}" href="{{ url_for('ui_transactions') }}">Транзакции</a>
-                </li>
-                 <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_add_transaction_form' %}active{% endif %}" href="{{ url_for('ui_add_transaction_form') }}">Добавить транзакцию</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_debts' %}active{% endif %}" href="{{ url_for('ui_debts') }}">Долги</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_analytics_overview' %}active{% endif %}" href="{{ url_for('ui_analytics_overview') }}">Аналитика</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {% if request.endpoint == 'ui_cashback_rules' or request.endpoint == 'ui_add_cashback_rule_form' %}active{% endif %}" href="{{ url_for('ui_cashback_rules') }}">Правила кэшбэка</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('ui_categories') }}">Категории</a>
+                {% set securities_endpoints = ['securities.ui_brokers', 'securities.ui_broker_detail', 'securities.ui_securities_assets', 'securities.ui_securities_transactions'] %}
+                <li class="nav-item dropdown {% if request.endpoint in securities_endpoints %}active{% endif %}">
+                    <a class="nav-link dropdown-toggle" href="#" id="securitiesDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                        Ценные бумаги
+                    </a>
+                    <div class="dropdown-menu" aria-labelledby="securitiesDropdown">
+                        <a class="dropdown-item" href="{{ url_for('securities.ui_brokers') }}">Брокеры</a>
+                        <a class="dropdown-item" href="{{ url_for('securities.ui_securities_assets') }}">Активы</a>
+                        <a class="dropdown-item" href="{{ url_for('securities.ui_securities_transactions') }}">История операций</a>
+                    </div>
                 </li>
             </ul>
         </div>
@@ -70,5 +88,6 @@
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.3/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

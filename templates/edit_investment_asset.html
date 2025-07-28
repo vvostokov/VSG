@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать актив: {{ asset.ticker }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Редактировать актив: {{ asset.ticker }}</h1>
+</div>
+
+<form method="POST" action="{{ url_for('ui_edit_investment_asset', asset_id=asset.id) }}">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label for="ticker" class="form-label">Тикер</label>
+                <input type="text" class="form-control" id="ticker" name="ticker" value="{{ asset.ticker }}" readonly>
+                <div class="form-text">Тикер и тип кошелька нельзя изменить. Для этого удалите и добавьте актив заново.</div>
+            </div>
+            <div class="mb-3">
+                <label for="source_account_type" class="form-label">Тип кошелька</label>
+                <input type="text" class="form-control" id="source_account_type" name="source_account_type" value="{{ asset.source_account_type }}" readonly>
+            </div>
+            <div class="mb-3">
+                <label for="quantity" class="form-label">Количество</label>
+                <input type="text" class="form-control" id="quantity" name="quantity" value="{{ asset.quantity|trim_zeros }}" required>
+                <div class="form-text">Используйте точку в качестве десятичного разделителя.</div>
+            </div>
+        </div>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+    <a href="{{ url_for('ui_investment_platform_detail', platform_id=asset.platform_id) }}" class="btn btn-secondary">Отмена</a>
+</form>
+{% endblock %}

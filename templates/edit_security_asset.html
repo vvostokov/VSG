@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать актив: {{ asset.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Редактировать актив: {{ asset.name }} ({{ asset.ticker }})</h1>
+</div>
+
+<form method="POST" action="{{ url_for('securities.ui_edit_security_asset', asset_id=asset.id) }}">
+    <div class="row">
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label for="ticker" class="form-label">Тикер</label>
+                <input type="text" class="form-control" id="ticker" name="ticker" value="{{ asset.ticker }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="name" class="form-label">Название актива</label>
+                <input type="text" class="form-control" id="name" name="name" value="{{ asset.name }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="asset_type" class="form-label">Тип актива</label>
+                <input type="text" class="form-control" id="asset_type" name="asset_type" value="{{ asset.asset_type }}" readonly>
+                <small class="form-text text-muted">Тип актива не редактируется.</small>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="mb-3">
+                <label for="quantity" class="form-label">Количество (шт.)</label>
+                <input type="text" class="form-control" id="quantity" name="quantity" value="{{ asset.quantity|trim_zeros }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="current_price" class="form-label">Текущая цена за 1 шт.</label>
+                <input type="text" class="form-control" id="current_price" name="current_price" value="{{ asset.current_price }}" required>
+            </div>
+            <div class="mb-3">
+                <label for="currency_of_price" class="form-label">Валюта цены</label>
+                <select class="form-select" id="currency_of_price" name="currency_of_price">
+                    <option value="RUB" {% if asset.currency_of_price == 'RUB' %}selected{% endif %}>RUB</option>
+                    <option value="USD" {% if asset.currency_of_price == 'USD' %}selected{% endif %}>USD</option>
+                </select>
+            </div>
+        </div>
+    </div>
+    
+    <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+    <a href="{{ url_for('securities.ui_broker_detail', platform_id=asset.platform_id) }}" class="btn btn-secondary">Отмена</a>
+</form>
+{% endblock %}

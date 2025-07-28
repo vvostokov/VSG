@@ -2,179 +2,188 @@
 
 {% block title %}Главная - Финансовый Помощник{% endblock %}
 
+{% macro render_change(change_value) %}
+    {% if change_value is not none and change_value != 0 %}
+        {% set color = 'text-success' if change_value > 0 else 'text-danger' %}
+        <span class="{{ color }}">
+            {{ "%.2f"|format(change_value) }}%
+            <i class="fas fa-arrow-{{ 'up' if change_value > 0 else 'down' }}"></i>
+        </span>
+    {% elif change_value == 0 %}
+        <span class="text-muted">0.00%</span>
+    {% else %}
+        <span class="text-muted">-</span>
+    {% endif %}
+{% endmacro %}
+
 {% block content %}
 <div class="container mt-4">
+    <!-- Сводные карточки -->
     <div class="row mb-4">
-        <div class="col-12">
-            <div class="jumbotron py-4">
-                <h1 class="display-4">Финансовый Помощник</h1>
-                <p class="lead">Добро пожаловать! Управляйте своими финансами, отслеживайте расходы, доходы и долги.</p>
+        <div class="col-md-3 mb-4">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Общая стоимость</h5>
+                    <p class="card-text h3">{{ "%.2f"|format(net_worth_rub) }} RUB</p>
+                </div>
             </div>
         </div>
-    </div>
-
-    <div class="row mb-4">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header">
-                    Акции Московской Биржи (MOEX)
-                </div>
+        <div class="col-md-3 mb-4">
+            <div class="card text-center h-100">
                 <div class="card-body">
-                    {% if moex_data %}
-                        <div class="row">
-                        {% for stock in moex_data %}
-                            <div class="col-lg-3 col-md-4 col-sm-6 mb-2">
-                                <strong>{{ stock.symbol }}</strong> ({{ stock.name }}):<br>
-                                {{ stock.price }}
-                                <span class="{{ stock.status_class }}">
-                                    ({{ stock.change_percent }}%)
-                                    {% if stock.change_percent > 0 %}▲{% elif stock.change_percent < 0 %}▼{% endif %}
-                                </span>
-                            </div>
-                        {% endfor %}
+                    <h5 class="card-title">Портфель ЦБ</h5>
+                    <p class="card-text h4">{{ "%.2f"|format(securities_summary.total_rub) }} RUB</p>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="securitiesChangeDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            За день: {{ render_change(securities_summary.changes['1d']) }}
+                        </button>
+                        <div class="dropdown-menu" aria-labelledby="securitiesChangeDropdown">
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За 7 дней</span> {{ render_change(securities_summary.changes['7d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За 30 дней</span> {{ render_change(securities_summary.changes['30d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За полгода</span> {{ render_change(securities_summary.changes['180d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За год</span> {{ render_change(securities_summary.changes['365d']) }}
+                            </a>
                         </div>
-                    {% else %}
-                        <p class="card-text">Не удалось загрузить данные по акциям Мосбиржи.</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row">
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    Общий баланс
-                </div>
-                <div class="card-body">
-                    {% if total_balance_by_currency %}
-                        <ul class="list-group list-group-flush">
-                        {% for currency, balance in total_balance_by_currency.items() %}
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                {{ currency }}
-                                <span class="badge badge-primary badge-pill" style="font-size: 1em;">{{ "%.2f"|format(balance) }}</span>
-                            </li>
-                        {% endfor %}
-                        </ul>
-                    {% else %}
-                        <p class="card-text">Нет данных о счетах для отображения общего баланса.</p>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-header">
-                    Быстрые действия
-                </div>
-                <div class="card-body">
-                    <div class="list-group">
-                        <a href="{{ url_for('ui_add_transaction_form') }}" class="list-group-item list-group-item-action">Добавить транзакцию</a>
-                        <a href="{{ url_for('ui_add_account_form') }}" class="list-group-item list-group-item-action">Добавить счет</a>
-                        <a href="{{ url_for('ui_add_debt_form') }}" class="list-group-item list-group-item-action">Добавить долг</a>
-                        <a href="{{ url_for('ui_categories') }}" class="list-group-item list-group-item-action">Управление категориями</a>
-                        <a href="{{ url_for('ui_transactions') }}" class="list-group-item list-group-item-action">Все транзакции</a>
-                        <a href="{{ url_for('ui_analytics_overview') }}" class="list-group-item list-group-item-action">Аналитика</a>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-    <div class="row mb-4">
-        <div class="col-md-12">
-            <div class="card">
-                <div class="card-header">
-                    Курсы криптовалют (CoinGecko)
-                </div>
+        <div class="col-md-3 mb-4">
+            <div class="card text-center h-100">
                 <div class="card-body">
-                    {% if crypto_data %}
-                        <div class="row">
-                        {% for crypto in crypto_data %}
-                            <div class="col-md-3 col-sm-6 mb-2">
-                                <strong>{{ crypto.name }}:</strong> {{ crypto.price }}
-                                <span class="{{ crypto.status_class }}">
-                                    ({{ crypto.change_24h }}%)
-                                    {% if crypto.change_24h > 0 %}▲{% elif crypto.change_24h < 0 %}▼{% endif %}
-                                </span>
-                            </div>
-                        {% endfor %}
+                    <h5 class="card-title">Крипто-портфель</h5>
+                    <p class="card-text h4">{{ "%.2f"|format(crypto_summary.total_rub) }} RUB</p>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="cryptoChangeDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            За день: {{ render_change(crypto_summary.changes['1d']) }}
+                        </button>
+                        <div class="dropdown-menu" aria-labelledby="cryptoChangeDropdown">
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За 7 дней</span> {{ render_change(crypto_summary.changes['7d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За 30 дней</span> {{ render_change(crypto_summary.changes['30d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За полгода</span> {{ render_change(crypto_summary.changes['180d']) }}
+                            </a>
+                            <a class="dropdown-item d-flex justify-content-between align-items-center" href="#">
+                                <span>За год</span> {{ render_change(crypto_summary.changes['365d']) }}
+                            </a>
                         </div>
-                    {% else %}
-                        <p class="card-text">Не удалось загрузить данные о курсах криптовалют.</p>
-                    {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-4">
+            <div class="card text-center h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Банковские счета</h5>
+                    <p class="card-text h4">{{ "%.2f"|format(banking_summary.total_rub) }} RUB</p>
+                    <p class="card-text"><span class="text-muted">-</span></p>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Обзор рынков -->
     <div class="row mb-4">
         <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-header">
-                    Сводка по Кэшбэку (всего)
-                </div>
+            <div class="card">
+                <div class="card-header">Рынок РФ</div>
                 <div class="card-body">
-                    {% if total_cashback_by_currency %}
-                        <ul class="list-group list-group-flush">
-                        {% for currency, total_amount in total_cashback_by_currency.items() %}
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                {{ currency }}
-                                <span class="badge badge-success badge-pill" style="font-size: 1em;">{{ "%.2f"|format(total_amount) }}</span>
-                            </li>
+                    <table class="table table-sm">
+                        <tbody>
+                        {% for item in moex_leaders %}
+                            <tr>
+                                <td><strong>{{ item.ticker }}</strong></td>
+                                <td class="text-right">{{ "%.2f"|format(item.price) }}</td>
+                                <td class="text-right">{{ render_change(item.change_pct) }}</td>
+                            </tr>
                         {% else %}
-                             <p class="card-text">Вы еще не получали кэшбэк.</p>
+                            <tr><td colspan="3" class="text-muted">Не удалось загрузить данные.</td></tr>
                         {% endfor %}
-                        </ul>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">Крипторынок</div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tbody>
+                        {% for item in crypto_leaders %}
+                            <tr>
+                                <td><strong>{{ item.ticker }}</strong></td>
+                                <td class="text-right">{{ "%.2f"|format(item.price) }}</td>
+                                <td class="text-right">{{ render_change(item.change_pct) }}</td>
+                            </tr>
+                        {% else %}
+                            <tr><td colspan="3" class="text-muted">Не удалось загрузить данные.</td></tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Вклады и накопительные счета -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">Вклады и накопительные счета</div>
+                <div class="card-body">
+                    {% if deposits_and_savings %}
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Счет</th>
+                                    <th>Тип</th>
+                                    <th class="text-right">Баланс</th>
+                                    <th class="text-right">Ставка</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for acc in deposits_and_savings %}
+                                <tr>
+                                    <td>{{ acc.name }}</td>
+                                    <td>{{ 'Вклад' if acc.account_type == 'deposit' else 'Накопительный' }}</td>
+                                    <td class="text-right"><strong>{{ "%.2f"|format(acc.balance) }} {{ acc.currency }}</strong></td>
+                                    <td class="text-right">{{ acc.interest_rate or '-' }}%</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
                     {% else %}
-                        <p class="card-text">Вы еще не получали кэшбэк.</p>
+                    <p class="text-muted">Нет активных вкладов или накопительных счетов.</p>
                     {% endif %}
                 </div>
             </div>
         </div>
-        <div class="col-md-6 mb-4"> {/* Изменено с col-12 на col-md-6 */}
+    </div>
+
+    <!-- Управление аналитикой -->
+    <div class="row mt-4">
+        <div class="col-12">
             <div class="card">
-                <div class="card-header">
-                    Последние транзакции
-                </div>
+                <div class="card-header">Управление данными</div>
                 <div class="card-body">
-                    {% if recent_transactions %}
-                        <div class="table-responsive">
-                            <table class="table table-hover table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Дата</th>
-                                        <th>Описание</th>
-                                        <th>Тип</th>
-                                        <th class="text-right">Сумма</th>
-                                        <th>Счет</th>
-                                        <th>Категория</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                {% for t in recent_transactions %}
-                                    <tr>
-                                        <td>{{ t.date.strftime('%Y-%m-%d') }}</td>
-                                        <td>{{ t.description | default('Без описания', true) }}</td>
-                                    <td>
-                                        {% if t.transaction_type == 'income' %}
-                                            <span class="badge badge-success">{{ t.transaction_type }}</span>
-                                        {% elif t.transaction_type == 'expense' %}
-                                            <span class="badge badge-danger">{{ t.transaction_type }}</span>
-                                        {% else %}
-                                            <span class="badge badge-info">{{ t.transaction_type }}</span>
-                                        {% endif %}
-                                    </td>
-                                        <td class="text-right {% if t.transaction_type == 'income' %}text-success{% elif t.transaction_type == 'expense' %}text-danger{% endif %}">{{ "%.2f"|format(t.amount) }} {{ t.account_ref.currency }}</td>
-                                        <td>{{ t.account_ref.name if t.account_ref else 'N/A' }}</td>
-                                        <td>{{ t.category_ref.name if t.category_ref else '-' }}</td>
-                                    </tr>
-                                {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <p class="card-text">Пока нет транзакций для отображения.</p>
-                    {% endif %}
+                    <!-- ИСПРАВЛЕНО: Кнопка пересчета истории ЦБ была перенесена. Эта кнопка теперь обновляет историю крипто-портфеля. -->
+                    <form action="{{ url_for('main.ui_refresh_portfolio_history') }}" method="POST" class="d-inline">
+                        <button type="submit" class="btn btn-info">Пересчитать историю крипто-портфеля</button>
+                    </form>
                 </div>
             </div>
         </div>
