@@ -36,10 +36,12 @@ def create_app():
     with app.app_context():
         # Import blueprints inside the context
         from main_routes import main_bp
+        from commands import analytics_cli
         from securities_logic import securities_bp
 
         app.register_blueprint(main_bp)
         app.register_blueprint(securities_bp)
+        app.cli.add_command(analytics_cli)
 
     return app
 
