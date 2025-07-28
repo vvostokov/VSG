@@ -6,5 +6,5 @@ __pycache__/
 venv/
 env/
 instance/
-finance_app.db  # Если вы используете SQLite локально
+app.db # Локальная база данных SQLite
 # Другие специфичные для вашей ОС или IDE файлы
