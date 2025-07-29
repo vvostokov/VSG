@@ -6,7 +6,7 @@
 <div class="container mt-4">
     <h2>Добавить новую инвестиционную платформу</h2>
     <hr>
-    <form method="POST" action="{{ url_for('ui_add_investment_platform_form') }}">
+    <form method="POST" action="{{ url_for('main.ui_add_investment_platform_form') }}">
         <div class="form-group">
             <label for="name">Название платформы</label>
             <input type="text" class="form-control" id="name" name="name" placeholder="Например, Binance" required>
