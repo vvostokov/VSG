@@ -338,7 +338,8 @@ def ui_sync_investment_platform(platform_id):
             if symbols_for_api:
                 price_data = price_fetcher_config['func'](target_symbols=symbols_for_api)
                 for item in price_data:
-                    ticker = item['symbol'].replace(price_fetcher_config['suffix'], '').replace('/', '').replace('-', '')
+                    # ИСПРАВЛЕНО: Используем правильный ключ 'ticker', который уже очищен
+                    ticker = item['ticker']
                     prices_by_ticker[ticker] = Decimal(item['price'])
 
         existing_db_assets = {(asset.ticker, asset.source_account_type): asset for asset in platform.assets}
