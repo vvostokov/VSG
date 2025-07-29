@@ -152,10 +152,10 @@ def ui_add_investment_platform_form():
         new_platform = InvestmentPlatform(
             name=request.form['name'],
             platform_type=request.form['platform_type'],
-            api_key=request.form.get('api_key'),
-            api_secret_encrypted=request.form.get('api_secret'),
-            passphrase_encrypted=request.form.get('passphrase'),
-            other_credentials_json_encrypted=request.form.get('other_credentials_json'),
+            api_key=request.form.get('api_key'), # api_key можно хранить открытым
+            api_secret=request.form.get('api_secret'), # Используем сеттер, который зашифрует
+            passphrase=request.form.get('passphrase'), # Используем сеттер, который зашифрует
+            other_credentials_json_encrypted=encrypt_data(request.form.get('other_credentials_json')), # Шифруем напрямую
             notes=request.form.get('notes'),
             is_active='is_active' in request.form,
             manual_earn_balances_json=manual_earn_balances_input
@@ -292,13 +292,13 @@ def ui_edit_investment_platform_form(platform_id):
         platform.platform_type = request.form['platform_type']
         # API Key can be nullable, so we can update it directly.
         platform.api_key = request.form.get('api_key')
-
+        
         # Only update encrypted fields if a new value is provided to avoid accidental erasure.
         # The form should present these as empty fields.
         if request.form.get('api_secret'):
-            platform.api_secret_encrypted = request.form.get('api_secret')
+            platform.api_secret = request.form.get('api_secret') # Используем сеттер
         if request.form.get('passphrase'):
-            platform.passphrase_encrypted = request.form.get('passphrase')
+            platform.passphrase = request.form.get('passphrase') # Используем сеттер
         if request.form.get('other_credentials_json'):
             platform.other_credentials_json_encrypted = request.form.get('other_credentials_json')
         platform.notes = request.form.get('notes')
@@ -321,8 +321,8 @@ def ui_sync_investment_platform(platform_id):
 
     try:
         api_key = platform.api_key
-        api_secret = platform.api_secret_encrypted
-        passphrase = platform.passphrase_encrypted
+        api_secret = platform.api_secret # Используем геттер, который расшифрует
+        passphrase = platform.passphrase # Используем геттер, который расшифрует
 
         fetched_assets_data = sync_function(api_key=api_key, api_secret=api_secret, passphrase=passphrase)
         
@@ -405,7 +405,7 @@ def ui_sync_investment_platform_transactions(platform_id):
         return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
     try:
-        api_key, api_secret, passphrase = platform.api_key, platform.api_secret_encrypted, platform.passphrase_encrypted
+        api_key, api_secret, passphrase = platform.api_key, platform.api_secret, platform.passphrase
         end_time_dt = datetime.now(timezone.utc)
         start_time_dt = platform.last_tx_synced_at or (end_time_dt - timedelta(days=2*365))
 

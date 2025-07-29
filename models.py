@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from extensions import db
+from utils import encrypt_data, decrypt_data
 
 class InvestmentPlatform(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -19,6 +20,26 @@ class InvestmentPlatform(db.Model):
     
     assets = db.relationship('InvestmentAsset', back_populates='platform', cascade="all, delete-orphan", lazy='dynamic')
     transactions = db.relationship('Transaction', back_populates='platform', cascade="all, delete-orphan", lazy='dynamic')
+
+    @property
+    def api_secret(self):
+        return decrypt_data(self.api_secret_encrypted)
+
+    @api_secret.setter
+    def api_secret(self, value):
+        self.api_secret_encrypted = encrypt_data(value)
+
+    @property
+    def passphrase(self):
+        return decrypt_data(self.passphrase_encrypted)
+
+    @passphrase.setter
+    def passphrase(self, value):
+        self.passphrase_encrypted = encrypt_data(value)
+
+    @property
+    def other_credentials_json(self):
+        return decrypt_data(self.other_credentials_json_encrypted)
 
     def __repr__(self):
         return f'<InvestmentPlatform {self.name}>'
