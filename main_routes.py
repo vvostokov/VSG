@@ -784,9 +784,14 @@ def ui_add_category_form():
     flash('Форма добавления категории еще не реализована.', 'info')
     return redirect(url_for('main.ui_categories'))
 
-@main_bp.route('/categories/<int:cat_id>/edit')
-def ui_edit_category_form(cat_id):
-    flash(f'Форма редактирования категории {cat_id} еще не реализована.', 'info')
+@main_bp.route('/categories/<int:category_id>/edit')
+def ui_edit_category_form(category_id):
+    flash(f'Форма редактирования категории {category_id} еще не реализована.', 'info')
+    return redirect(url_for('main.ui_categories'))
+
+@main_bp.route('/categories/<int:category_id>/delete', methods=['POST'])
+def ui_delete_category(category_id):
+    flash(f'Удаление категории {category_id} еще не реализовано.', 'info')
     return redirect(url_for('main.ui_categories'))
 
 @main_bp.route('/debts')

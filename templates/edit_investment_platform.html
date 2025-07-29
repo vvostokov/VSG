@@ -26,11 +26,13 @@
         </div>
         <div class="form-group">
             <label for="api_secret">API Secret</label>
-            <input type="password" class="form-control" id="api_secret" name="api_secret" value="{{ platform.api_secret_encrypted or '' }}">
+            <input type="password" class="form-control" id="api_secret" name="api_secret" placeholder="Введите новый секрет, чтобы изменить">
+            <small class="form-text text-muted">Оставьте пустым, чтобы не изменять.</small>
         </div>
         <div class="form-group">
             <label for="passphrase">Passphrase (если требуется)</label>
-            <input type="password" class="form-control" id="passphrase" name="passphrase" value="{{ platform.passphrase_encrypted or '' }}"> {# Keep as password type #}
+            <input type="password" class="form-control" id="passphrase" name="passphrase" placeholder="Введите новую фразу, чтобы изменить">
+            <small class="form-text text-muted">Оставьте пустым, чтобы не изменять.</small>
         </div>
         <div class="form-group">
             <label for="manual_earn_balances_input">Ручные Earn Балансы (JSON)</label>
