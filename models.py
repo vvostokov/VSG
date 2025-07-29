@@ -41,6 +41,10 @@ class InvestmentPlatform(db.Model):
     def other_credentials_json(self):
         return decrypt_data(self.other_credentials_json_encrypted)
 
+    @other_credentials_json.setter
+    def other_credentials_json(self, value):
+        self.other_credentials_json_encrypted = encrypt_data(value)
+
     def __repr__(self):
         return f'<InvestmentPlatform {self.name}>'
     @property

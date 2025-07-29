@@ -41,7 +41,8 @@
         </div>
         <div class="form-group">
             <label for="other_credentials_json">Другие данные (JSON)</label>
-            <textarea class="form-control" id="other_credentials_json" name="other_credentials_json" rows="3">{{ platform.other_credentials_json_encrypted or '' }}</textarea>
+            <textarea class="form-control" id="other_credentials_json" name="other_credentials_json" rows="3" placeholder="Введите новые данные, чтобы изменить"></textarea>
+            <small class="form-text text-muted">Оставьте пустым, чтобы не изменять. Текущее значение не отображается из соображений безопасности.</small>
         </div>
         <hr>
         <div class="form-group">

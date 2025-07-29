@@ -155,7 +155,7 @@ def ui_add_investment_platform_form():
             api_key=request.form.get('api_key'), # api_key можно хранить открытым
             api_secret=request.form.get('api_secret'), # Используем сеттер, который зашифрует
             passphrase=request.form.get('passphrase'), # Используем сеттер, который зашифрует
-            other_credentials_json_encrypted=encrypt_data(request.form.get('other_credentials_json')), # Шифруем напрямую
+            other_credentials_json=request.form.get('other_credentials_json'), # Используем сеттер
             notes=request.form.get('notes'),
             is_active='is_active' in request.form,
             manual_earn_balances_json=manual_earn_balances_input
@@ -300,7 +300,7 @@ def ui_edit_investment_platform_form(platform_id):
         if request.form.get('passphrase'):
             platform.passphrase = request.form.get('passphrase') # Используем сеттер
         if request.form.get('other_credentials_json'):
-            platform.other_credentials_json_encrypted = request.form.get('other_credentials_json')
+            platform.other_credentials_json = request.form.get('other_credentials_json') # Используем сеттер
         platform.notes = request.form.get('notes')
         platform.is_active = 'is_active' in request.form
         platform.manual_earn_balances_json = manual_earn_balances_input
