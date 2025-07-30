@@ -447,6 +447,45 @@ def ui_sync_investment_platform_transactions(platform_id):
                     asset1_amount, asset2_amount = Decimal(trade.get('execQty', '0')), Decimal(trade.get('execValue', '0'))
                     db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['execTime']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=asset2_amount / asset1_amount if asset1_amount else 0, fee_amount=Decimal(trade.get('execFee', '0')), fee_currency=base_coin if trade['side'].lower() == 'buy' else quote_coin, platform_id=platform.id, description=f"Spot {trade['side'].lower()} {asset1_amount} {base_coin}"))
                     added_count += 1
+        elif platform_name == 'bitget':
+            for d in fetched_data.get('deposits', []):
+                prefixed_id = f"bitget_deposit_{d['id']}"
+                if prefixed_id not in existing_tx_ids and d.get('status') == 'success':
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['cTime']), type='deposit', raw_type='Deposit', asset1_ticker=d['coin'], asset1_amount=Decimal(d['amount']), platform_id=platform.id))
+                    added_count += 1
+            for w in fetched_data.get('withdrawals', []):
+                prefixed_id = f"bitget_withdrawal_{w['withdrawId']}"
+                if prefixed_id not in existing_tx_ids and w.get('status') == 'success':
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(w['cTime']), type='withdrawal', raw_type='Withdrawal', asset1_ticker=w['coin'], asset1_amount=Decimal(w['amount']), fee_amount=Decimal(w.get('fee', '0')), fee_currency=w['coin'], platform_id=platform.id))
+                    added_count += 1
+            for trade in fetched_data.get('trades', []):
+                prefixed_id = f"bitget_trade_{trade['tradeId']}"
+                if prefixed_id not in existing_tx_ids:
+                    base_coin, quote_coin = trade['symbol'][:-4], 'USDT'
+                    asset1_amount = Decimal(trade.get('fillQuantity', '0'))
+                    asset2_amount = Decimal(trade.get('fillTotalAmount', '0'))
+                    fee_details = trade.get('feeDetail', [{}])[0]
+                    fee_amount = Decimal(fee_details.get('deductAmount', '0'))
+                    fee_currency = fee_details.get('deductCoin', base_coin if trade['side'] == 'buy' else quote_coin)
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['cTime']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=Decimal(trade.get('fillPrice', '0')), fee_amount=fee_amount, fee_currency=fee_currency, platform_id=platform.id))
+                    added_count += 1
+        elif platform_name == 'bingx':
+            for d in fetched_data.get('deposits', []):
+                prefixed_id = f"bingx_deposit_{d['id']}"
+                if prefixed_id not in existing_tx_ids and d.get('status') == 'success':
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['insertTime']), type='deposit', raw_type='Deposit', asset1_ticker=d['asset'], asset1_amount=Decimal(d['amount']), platform_id=platform.id))
+                    added_count += 1
+            for w in fetched_data.get('withdrawals', []):
+                prefixed_id = f"bingx_withdrawal_{w['id']}"
+                if prefixed_id not in existing_tx_ids and w.get('status') == 'success':
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(w['applyTime']), type='withdrawal', raw_type='Withdrawal', asset1_ticker=w['asset'], asset1_amount=Decimal(w['amount']), fee_amount=Decimal(w.get('fee', '0')), fee_currency=w['asset'], platform_id=platform.id))
+                    added_count += 1
+            for trade in fetched_data.get('trades', []):
+                prefixed_id = f"bingx_trade_{trade['id']}"
+                if prefixed_id not in existing_tx_ids:
+                    base_coin, quote_coin = trade['symbol'].split('-')
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['time']), type='buy' if trade['side'] == 'BUY' else 'sell', raw_type=f"Spot Trade ({trade['side']})", asset1_ticker=base_coin, asset1_amount=Decimal(trade['qty']), asset2_ticker=quote_coin, asset2_amount=Decimal(trade['quoteQty']), execution_price=Decimal(trade['price']), fee_amount=Decimal(trade.get('commission', '0')), fee_currency=trade.get('commissionAsset'), platform_id=platform.id))
+                    added_count += 1
         # ... other platforms (bitget, okx, bingx) ...
 
         platform.last_tx_synced_at = end_time_dt
