@@ -77,20 +77,18 @@ def _bingx_api_get(api_key: str, api_secret: str, endpoint: str, params: dict = 
     """Внутренняя функция для выполнения GET-запросов к BingX с подписью."""
     timestamp = _get_timestamp_ms()
 
-    # Строка для подписи формируется из параметров запроса и timestamp.
-    sign_params = {'timestamp': timestamp}
-    if params:
-        sign_params['apiKey'] = api_key # BingX требует apiKey в параметрах для подписи
-        sign_params.update(params)
+    # Все параметры для запроса, включая timestamp
+    all_params = params.copy() if params else {}
+    all_params['timestamp'] = timestamp
 
-    # Сортируем и кодируем параметры для подписи
-    query_string_to_sign = urlencode(sorted(sign_params.items()))
+    # Сортируем и кодируем параметры для подписи. apiKey не включается в подпись.
+    query_string_to_sign = urlencode(sorted(all_params.items()))
 
     # Создаем подпись
     signature = hmac.new(api_secret.encode('utf-8'), query_string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
 
     # Финальные параметры для URL-запроса (уже содержат timestamp)
-    request_params = sign_params.copy()
+    request_params = all_params.copy()
     request_params['signature'] = signature
 
     url = f"{BINGX_BASE_URL}{endpoint}"
@@ -260,9 +258,8 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
     endpoint = "/openApi/spot/v1/ticker/24hr"
     url = f"{BINGX_BASE_URL}{endpoint}"
     try:
-        # ИСПРАВЛЕНО: Этот публичный эндпоинт не требует подписи, но, судя по логам, требует timestamp.
-        params = {'timestamp': _get_timestamp_ms()}
-        response_data = _make_request('GET', url, params=params)
+        # Этот публичный эндпоинт не требует параметров.
+        response_data = _make_request('GET', url)
         if response_data.get('code') != 0:
             raise Exception(f"Ошибка API BingX: {response_data.get('msg')}")
         
@@ -271,8 +268,7 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
         for symbol in target_symbols:
             if symbol in all_tickers:
                 ticker_data = all_tickers[symbol]
-                change_24h_str = ticker.get('priceChangePercent', '0')
-                # Remove '%' if present, then convert to float
+                change_24h_str = ticker_data.get('priceChangePercent', '0')
                 if isinstance(change_24h_str, str) and change_24h_str.endswith('%'):
                     change_24h = float(change_24h_str.rstrip('%'))
                 else:
@@ -280,7 +276,7 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
                 formatted_data.append({
                     'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
                     'price': Decimal(ticker_data['lastPrice']), # Цена как Decimal
-                    'change_pct': change_24h
+                    'change_pct': change_24h,
                 })
         return formatted_data
     except Exception as e:
@@ -302,11 +298,11 @@ def fetch_kucoin_spot_tickers(target_symbols: list) -> list:
         for symbol in target_symbols:
             if symbol in all_tickers:
                 ticker_data = all_tickers[symbol]
-                change_24h = float(ticker.get('changeRate', '0')) * 100
+                change_24h = float(ticker_data.get('changeRate', '0')) * 100
                 formatted_data.append({
                     'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
                     'price': Decimal(ticker_data['last']), # Цена как Decimal
-                    'change_pct': change_24h
+                    'change_pct': change_24h,
                 })
         return formatted_data
     except Exception as e:
@@ -328,11 +324,11 @@ def fetch_okx_spot_tickers(target_symbols: list) -> list:
         for symbol in target_symbols:
             if symbol in all_tickers:
                 ticker_data = all_tickers[symbol]
-                change_24h = float(ticker.get('chg24h', '0')) * 100
+                change_24h = float(ticker_data.get('chg24h', '0')) * 100
                 formatted_data.append({
                     'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
                     'price': Decimal(ticker_data['last']), # Цена как Decimal
-                    'change_pct': change_24h
+                    'change_pct': change_24h,
                 })
         return formatted_data
     except Exception as e:
