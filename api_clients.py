@@ -242,14 +242,12 @@ def fetch_bitget_spot_tickers(target_symbols: list) -> list:
         for symbol in target_symbols:
             # Символ в target_symbols уже должен быть в формате API (например, BTCUSDT)
             if symbol in all_tickers:
-                ticker = all_tickers[symbol]
-                # ИСПРАВЛЕНО: Используем правильный ключ 'priceChangePercent24h' для API v2
-                change_24h = float(ticker.get('priceChangePercent24h', '0')) * 100
+                ticker_data = all_tickers[symbol]
+                change_24h = float(ticker_data.get('priceChangePercent24h', '0')) * 100
                 formatted_data.append({
-                    'symbol': symbol,
-                    'price': ticker['lastPr'],
-                    'change_24h': change_24h,
-                    'status_class': 'text-success' if change_24h > 0 else 'text-danger'
+                    'ticker': symbol.replace('USDT', ''), # Очищенный тикер
+                    'price': Decimal(ticker_data['lastPr']), # Цена как Decimal
+                    'change_pct': change_24h
                 })
         return formatted_data
     except Exception as e:
@@ -272,7 +270,7 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
         formatted_data = []
         for symbol in target_symbols:
             if symbol in all_tickers:
-                ticker = all_tickers[symbol]
+                ticker_data = all_tickers[symbol]
                 change_24h_str = ticker.get('priceChangePercent', '0')
                 # Remove '%' if present, then convert to float
                 if isinstance(change_24h_str, str) and change_24h_str.endswith('%'):
@@ -280,10 +278,9 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
                 else:
                     change_24h = float(change_24h_str)
                 formatted_data.append({
-                    'symbol': ticker['symbol'],
-                    'price': ticker['lastPrice'],
-                    'change_24h': change_24h,
-                    'status_class': 'text-success' if change_24h > 0 else 'text-danger'
+                    'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
+                    'price': Decimal(ticker_data['lastPrice']), # Цена как Decimal
+                    'change_pct': change_24h
                 })
         return formatted_data
     except Exception as e:
@@ -304,13 +301,12 @@ def fetch_kucoin_spot_tickers(target_symbols: list) -> list:
         formatted_data = []
         for symbol in target_symbols:
             if symbol in all_tickers:
-                ticker = all_tickers[symbol]
+                ticker_data = all_tickers[symbol]
                 change_24h = float(ticker.get('changeRate', '0')) * 100
                 formatted_data.append({
-                    'symbol': ticker['symbol'],
-                    'price': ticker['last'],
-                    'change_24h': change_24h,
-                    'status_class': 'text-success' if change_24h > 0 else 'text-danger'
+                    'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
+                    'price': Decimal(ticker_data['last']), # Цена как Decimal
+                    'change_pct': change_24h
                 })
         return formatted_data
     except Exception as e:
@@ -331,13 +327,12 @@ def fetch_okx_spot_tickers(target_symbols: list) -> list:
         formatted_data = []
         for symbol in target_symbols:
             if symbol in all_tickers:
-                ticker = all_tickers[symbol]
+                ticker_data = all_tickers[symbol]
                 change_24h = float(ticker.get('chg24h', '0')) * 100
                 formatted_data.append({
-                    'symbol': ticker['instId'],
-                    'price': ticker['last'],
-                    'change_24h': change_24h,
-                    'status_class': 'text-success' if change_24h > 0 else 'text-danger'
+                    'ticker': symbol.replace('-USDT', ''), # Очищенный тикер
+                    'price': Decimal(ticker_data['last']), # Цена как Decimal
+                    'change_pct': change_24h
                 })
         return formatted_data
     except Exception as e:
