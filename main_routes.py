@@ -655,11 +655,28 @@ def ui_refresh_historical_data():
 
 @main_bp.route('/analytics/refresh-performance-chart', methods=['POST'])
 def ui_refresh_performance_chart():
-    success, message = refresh_performance_chart_data()
-    if success:
-        flash(message, 'success')
+    """
+    Triggers a one-off background run of the performance chart refresh Cron Job on Render.
+    """
+    render_api_key = os.environ.get('RENDER_API_KEY')
+    # You need to find this ID in your Render dashboard for the Cron Job
+    cron_job_id = os.environ.get('RENDER_CRON_JOB_ID_PERFORMANCE') 
+
+    if not render_api_key or not cron_job_id:
+        flash('Render API Key или ID фоновой задачи для графика производительности не настроены.', 'danger')
+        return redirect(url_for('main.ui_crypto_assets'))
+
+    headers = {
+        'Authorization': f'Bearer {render_api_key}',
+        'Accept': 'application/json',
+    }
+    url = f'https://api.render.com/v1/services/{cron_job_id}/jobs'
+    response = requests.post(url, headers=headers)
+
+    if response.status_code == 201:
+        flash('Запущено фоновое обновление графика производительности. Данные появятся через несколько минут.', 'info')
     else:
-        flash(message, 'danger')
+        flash(f'Ошибка при запуске фонового обновления: {response.text}', 'danger')
     return redirect(url_for('main.ui_crypto_assets'))
 
 @main_bp.route('/analytics/refresh-portfolio-history', methods=['POST'])
