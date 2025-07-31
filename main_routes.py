@@ -10,8 +10,8 @@ from models import Debt, Account, BankingTransaction
 from extensions import db
 from models import (
     InvestmentPlatform, InvestmentAsset, Transaction, Account, Category, Debt,
-    BankingTransaction, HistoricalPriceCache, PortfolioHistory, HistoricalPrice,
-    SecuritiesPortfolioHistory
+    BankingTransaction, HistoricalPriceCache, PortfolioHistory, HistoricalPrice, JsonCache,
+    SecuritiesPortfolioHistory,
 )
 from api_clients import (
     SYNC_DISPATCHER, SYNC_TRANSACTIONS_DISPATCHER, PRICE_TICKER_DISPATCHER,
