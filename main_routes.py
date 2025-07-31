@@ -1,7 +1,6 @@
 import os
 import json
 from datetime import datetime, date, timezone, timedelta
-import requests
 from collections import namedtuple, defaultdict
 from flask import (Blueprint, render_template, request, redirect, url_for, flash, current_app)
 from decimal import Decimal, InvalidOperation
@@ -694,55 +693,25 @@ def ui_refresh_historical_data():
 
 @main_bp.route('/analytics/refresh-performance-chart', methods=['POST'])
 def ui_refresh_performance_chart():
-    """
-    Triggers a one-off background run of the performance chart refresh Cron Job on Render.
-    """
-    render_api_key = os.environ.get('RENDER_API_KEY')
-    # You need to find this ID in your Render dashboard for the Cron Job
-    cron_job_id = os.environ.get('RENDER_CRON_JOB_ID_PERFORMANCE') 
-
-    if not render_api_key or not cron_job_id:
-        flash('Render API Key или ID фоновой задачи для графика производительности не настроены.', 'danger')
-        return redirect(url_for('main.ui_crypto_assets'))
-
-    headers = {
-        'Authorization': f'Bearer {render_api_key}',
-        'Accept': 'application/json',
-    }
-    url = f'https://api.render.com/v1/services/{cron_job_id}/jobs'
-    response = requests.post(url, headers=headers)
-
-    if response.status_code == 201:
-        flash('Запущено фоновое обновление графика производительности. Данные появятся через несколько минут.', 'info')
+    # ИЗМЕНЕНО: Выполняем задачу напрямую, а не в фоне.
+    # Это будет долго, но бесплатно.
+    flash('Началось обновление данных для графика производительности. Пожалуйста, подождите...', 'info')
+    success, message = refresh_performance_chart_data()
+    if success:
+        flash(message, 'success')
     else:
-        flash(f'Ошибка при запуске фонового обновления: {response.text}', 'danger')
+        flash(message, 'danger')
     return redirect(url_for('main.ui_crypto_assets'))
 
 @main_bp.route('/analytics/refresh-portfolio-history', methods=['POST'])
 def ui_refresh_portfolio_history():
-    """
-    Triggers a one-off background run of the history refresh Cron Job on Render.
-    This avoids blocking the web server and causing timeouts.
-    """
-    render_api_key = os.environ.get('RENDER_API_KEY')
-    # You need to find this ID in your Render dashboard for the Cron Job
-    cron_job_id = os.environ.get('RENDER_CRON_JOB_ID_HISTORY') 
-
-    if not render_api_key or not cron_job_id:
-        flash('Render API Key или ID фоновой задачи не настроены в переменных окружения.', 'danger')
-        return redirect(url_for('main.ui_crypto_assets'))
-
-    headers = {
-        'Authorization': f'Bearer {render_api_key}',
-        'Accept': 'application/json',
-    }
-    url = f'https://api.render.com/v1/services/{cron_job_id}/jobs'
-    response = requests.post(url, headers=headers)
-
-    if response.status_code == 201:
-        flash('Запущено фоновое обновление истории портфеля. Данные появятся через несколько минут.', 'info')
+    # ИЗМЕНЕНО: Выполняем задачу напрямую.
+    flash('Началось обновление истории портфеля. Это может занять несколько минут...', 'info')
+    success, message = refresh_crypto_portfolio_history()
+    if success:
+        flash(message, 'success')
     else:
-        flash(f'Ошибка при запуске фонового обновления: {response.text}', 'danger')
+        flash(message, 'danger')
     return redirect(url_for('main.ui_crypto_assets'))
 
 @main_bp.route('/analytics/refresh-securities-history', methods=['POST'])
