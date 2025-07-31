@@ -14,7 +14,7 @@ from models import (
     JsonCache
 )
 from securities_logic import fetch_moex_historical_prices
-from api_clients import fetch_bybit_historical_price_range, fetch_bybit_spot_tickers
+from api_clients import fetch_bybit_historical_price_range, fetch_bybit_spot_tickers, PRICE_TICKER_DISPATCHER
 
 def refresh_securities_portfolio_history():
     """
@@ -367,3 +367,31 @@ def get_performance_chart_data_from_cache():
         return json.loads(cache_entry.json_data), cache_entry.last_updated
     else:
         return {}, None
+
+def refresh_market_leaders_cache():
+    """Fetches and caches market leader data from MOEX and crypto exchanges."""
+    print("--- [Analytics] Начало обновления кэша лидеров рынка ---")
+    try:
+        moex_leaders = fetch_moex_market_leaders(['IMOEX', 'SBER', 'GAZP', 'LKOH', 'ROSN', 'YNDX'])
+        crypto_leaders = fetch_bybit_spot_tickers(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'TONUSDT'])
+
+        market_data = {
+            'moex': moex_leaders,
+            'crypto': crypto_leaders,
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+
+        cache_key = 'market_leaders_data'
+        cache_entry = JsonCache.query.filter_by(cache_key=cache_key).first()
+        if not cache_entry:
+            cache_entry = JsonCache(cache_key=cache_key)
+            db.session.add(cache_entry)
+        
+        cache_entry.json_data = json.dumps(market_data, default=str) # Use default=str for Decimal
+        db.session.commit()
+        print("--- [Analytics] Кэш лидеров рынка успешно обновлен. ---")
+        return True, "Кэш лидеров рынка обновлен."
+    except Exception as e:
+        db.session.rollback()
+        print(f"--- [Analytics ERROR] Ошибка при обновлении кэша лидеров рынка: {e}")
+        return False, f"Ошибка при обновлении кэша лидеров рынка: {e}"

@@ -20,8 +20,8 @@ from api_clients import (
 )
 from analytics_logic import (
     refresh_crypto_price_change_data, refresh_crypto_portfolio_history, refresh_securities_portfolio_history,
-    get_performance_chart_data_from_cache, refresh_performance_chart_data)
-from securities_logic import fetch_moex_market_leaders
+    get_performance_chart_data_from_cache, refresh_performance_chart_data, refresh_market_leaders_cache)
+from securities_logic import fetch_moex_market_leaders, fetch_moex_securities_metadata
 
 main_bp = Blueprint('main', __name__)
 
@@ -117,8 +117,13 @@ def index():
     net_worth_rub = securities_total_rub + crypto_total_rub + banking_total_rub
 
     # --- 5. Рыночные данные ---
-    moex_leaders = fetch_moex_market_leaders(['IMOEX', 'SBER', 'GAZP', 'LKOH', 'ROSN', 'YNDX'])
-    crypto_leaders = fetch_bybit_spot_tickers(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'TONUSDT'])
+    # ИЗМЕНЕНО: Получаем данные из кэша, а не в реальном времени
+    market_leaders_cache = JsonCache.query.filter_by(cache_key='market_leaders_data').first()
+    if market_leaders_cache:
+        market_data = json.loads(market_leaders_cache.json_data)
+        moex_leaders, crypto_leaders = market_data.get('moex', []), market_data.get('crypto', [])
+    else:
+        moex_leaders, crypto_leaders = [], []
 
     return render_template(
         'index.html',
