@@ -1,0 +1,37 @@
+services:
+  # 1. База данных PostgreSQL
+  # Render автоматически создаст базу данных и предоставит URL для подключения.
+  - type: psql
+    name: zamliky-db
+    plan: free # Бесплатный план для старта. Можно изменить на платный.
+    # Render автоматически установит переменную окружения DATABASE_URL для других сервисов.
+
+  # 2. Веб-сервис Flask (ваше основное приложение)
+  - type: web
+    name: zamliky-app
+    env: python
+    plan: free # Бесплатные веб-сервисы "засыпают" при неактивности.
+    repo: https://github.com/YOUR_USERNAME/YOUR_REPO_NAME # <-- ЗАМЕНИТЕ НА ВАШ РЕПОЗИТОРИЙ
+    branch: main # или другая ваша основная ветка
+    
+    # Команды, которые выполняются при каждом развертывании
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      flask db upgrade
+      
+    # Команда для запуска вашего приложения
+    startCommand: gunicorn "app:create_app()"
+    
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.5 # Укажите вашу версию Python
+      - key: SECRET_KEY
+        generateValue: true # Render сгенерирует безопасный ключ автоматически
+      - key: CRON_SECRET_KEY # Новый ключ для защиты эндпоинта задач
+        generateValue: true
+      - fromService:
+          type: psql
+          name: zamliky-db
+          property: connectionString
+        key: DATABASE_URL

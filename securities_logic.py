@@ -66,6 +66,33 @@ def fetch_moex_securities_metadata(tickers: list[str]) -> dict[str, dict]:
                 print(f"INFO: Не удалось найти метаданные для '{ticker_query}' на MOEX: {e}")
     return metadata
 
+def fetch_moex_historical_price_range(secids: list[str], start_date: date, end_date: date) -> dict[str, dict[date, Decimal]]:
+    """
+    Получает диапазон исторических цен закрытия для списка SECID с MOEX.
+    Возвращает словарь {secid: {дата: цена}}.
+    """
+    all_prices = defaultdict(dict)
+    with requests.Session() as session:
+        for secid in secids:
+            try:
+                print(f"--- [MOEX History Range] Запрос истории для {secid} с {start_date} по {end_date}...")
+                # Запрашиваем данные за весь диапазон
+                history = apimoex.get_market_history(
+                    session,
+                    security=secid,
+                    start=start_date.isoformat(),
+                    end=end_date.isoformat(),
+                    columns=('TRADEDATE', 'CLOSE')
+                )
+                if history:
+                    for record in history:
+                        trade_date = datetime.strptime(record['TRADEDATE'], '%Y-%m-%d').date()
+                        all_prices[secid][trade_date] = Decimal(str(record['CLOSE']))
+            except Exception as e:
+                print(f"--- [MOEX History Range] Ошибка при получении истории для {secid}: {e}")
+            time.sleep(0.2) # Пауза между запросами по тикерам
+    return all_prices
+
 def fetch_moex_historical_prices(isins: list[str], target_date: date) -> dict[str, Decimal]:
     """
     Получает исторические цены закрытия для списка ISIN на конкретную дату.

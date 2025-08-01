@@ -13,15 +13,18 @@ from models import (
     Transaction, InvestmentPlatform, SecuritiesPortfolioHistory, InvestmentAsset, HistoricalPriceCache, PortfolioHistory,
     JsonCache
 )
-from securities_logic import fetch_moex_historical_prices
+from securities_logic import (
+    fetch_moex_historical_prices, fetch_moex_securities_metadata, fetch_moex_historical_price_range
+)
 from api_clients import fetch_bybit_historical_price_range, fetch_bybit_spot_tickers, PRICE_TICKER_DISPATCHER
 
 def refresh_securities_portfolio_history():
     """
-    Пересчитывает и сохраняет ежедневную стоимость портфеля ценных бумаг.
+    Пересчитывает и сохраняет ежедневную стоимость портфеля ценных бумаг. 
+    Оптимизированная версия с пакетной загрузкой исторических цен.
     """
-    print("--- [Analytics] Начало обновления истории портфеля ЦБ ---")
-    
+    print("--- [Analytics] Начало обновления истории портфеля ЦБ (оптимизированная версия) ---")
+
     first_tx = Transaction.query.join(InvestmentPlatform).filter(
         InvestmentPlatform.platform_type == 'stock_broker'
     ).order_by(Transaction.timestamp.asc()).first()
@@ -37,14 +40,28 @@ def refresh_securities_portfolio_history():
         InvestmentPlatform.platform_type == 'stock_broker'
     ).order_by(Transaction.timestamp.asc()).all()
 
+    # 1. Определяем все уникальные ISIN-коды за всю историю
+    all_isins = set(tx.asset1_ticker for tx in all_txs if tx.asset1_ticker)
+    print(f"--- [Analytics] Найдены уникальные ISIN: {all_isins}")
+
+    # 2. Получаем метаданные (включая SECID) для всех ISIN
+    securities_meta = fetch_moex_securities_metadata(list(all_isins))
+    isin_to_secid_map = {isin: meta.get('ticker') for isin, meta in securities_meta.items() if meta.get('ticker')}
+    secids_to_fetch = list(isin_to_secid_map.values())
+    print(f"--- [Analytics] Будут запрошены исторические цены для SECID: {secids_to_fetch}")
+
+    # 3. Загружаем всю историю цен для каждого SECID
+    historical_prices_by_secid = fetch_moex_historical_price_range(secids_to_fetch, start_date, end_date)
+
+    # 4. Проходим по дням и считаем портфель, используя кэш цен
     SecuritiesPortfolioHistory.query.delete()
     db.session.commit()
 
     holdings = defaultdict(Decimal)
     tx_index = 0
     
-    for current_date in pd.date_range(start=start_date, end=end_date):
-        current_date = current_date.date()
+    for current_date_dt in pd.date_range(start=start_date, end=end_date):
+        current_date = current_date_dt.date()
         
         while tx_index < len(all_txs) and all_txs[tx_index].timestamp.date() <= current_date:
             tx = all_txs[tx_index]
@@ -52,17 +69,32 @@ def refresh_securities_portfolio_history():
                 amount = tx.asset1_amount if tx.type == 'buy' else -tx.asset1_amount
                 holdings[tx.asset1_ticker] += amount
             tx_index += 1
-        
+
         current_holdings = {isin: qty for isin, qty in holdings.items() if qty > 0}
         
         if not current_holdings:
             db.session.add(SecuritiesPortfolioHistory(date=current_date, total_value_rub=Decimal(0)))
             continue
+
+        total_value = Decimal(0)
+        for isin, quantity in current_holdings.items():
+            secid = isin_to_secid_map.get(isin)
+            if not secid:
+                continue
+
+            price_rub = None
+            # Искать цену за последнюю неделю, если на дату нет торгов
+            for i in range(7):
+                check_date = current_date - timedelta(days=i)
+                if secid in historical_prices_by_secid and check_date in historical_prices_by_secid[secid]:
+                    price_rub = historical_prices_by_secid[secid][check_date]
+                    break
             
-        prices = fetch_moex_historical_prices(list(current_holdings.keys()), current_date)
-        
-        total_value = sum(quantity * prices.get(isin, Decimal(0)) for isin, quantity in current_holdings.items())
-            
+            if price_rub is not None:
+                total_value += quantity * price_rub
+            else:
+                print(f"--- [Analytics Warning] Не найдена историческая цена для {isin} ({secid}) на {current_date} или ранее.")
+
         db.session.add(SecuritiesPortfolioHistory(date=current_date, total_value_rub=total_value))
 
     db.session.commit()
