@@ -9,5 +9,9 @@
     <div class="alert alert-info">
         Этот раздел находится в разработке.
     </div>
+    <p><strong>Дата:</strong> {{ transaction.date.strftime('%d.%m.%Y %H:%M') }}</p>
+    <p><strong>Сумма:</strong> {{ transaction.amount|trim_zeros }} {{ transaction.account_ref.currency }}</p>
+    <p><strong>Описание:</strong> {{ transaction.description }}</p>
+    <a href="{{ url_for('main.ui_transactions') }}" class="btn btn-secondary">Назад к списку</a>
 </div>
 {% endblock %}

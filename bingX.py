@@ -1,14 +1,15 @@
 import time
 import hmac
 import hashlib
+import os
 import requests
 import json
 from urllib.parse import urlencode, quote_plus
 from collections import defaultdict
 
-# Ваши API ключи для BingX
-API_KEY = 'VR5wuEf01Nw3LY1Jfg1d9nGat09DjQsKVR5tAeOhqAlvNS8tygfM4cqVoixevUDGs4Kd9OAnrHKzeIvHZw'
-API_SECRET = 'nJlyVJO8mrGUe6zP26jgMc3uijRY8ZFhXq2h16MKWkKxB85aJucqF3UJP9NAexJnjl68m1bgiFMXfYdosQ'
+# Ваши API ключи для BingX (загружаются из переменных окружения)
+API_KEY = os.environ.get('BINGX_API_KEY')
+API_SECRET = os.environ.get('BINGX_API_SECRET')
 BASE_URL = 'https://open-api.bingx.com' # Уточните базовый URL для API BingX
 
 def get_timestamp_ms():

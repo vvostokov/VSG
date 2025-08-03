@@ -7,11 +7,11 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func, asc, desc
 from models import Debt, Account, BankingTransaction
-from extensions import db
+from extensions import db # noqa
 from models import (
     InvestmentPlatform, InvestmentAsset, Transaction, Account, Category, Debt,
-    BankingTransaction, HistoricalPriceCache, PortfolioHistory, HistoricalPrice, JsonCache,
-    SecuritiesPortfolioHistory,
+    BankingTransaction, HistoricalPriceCache, PortfolioHistory, JsonCache,
+    SecuritiesPortfolioHistory, TransactionItem,
 )
 from api_clients import (
     SYNC_DISPATCHER, SYNC_TRANSACTIONS_DISPATCHER, PRICE_TICKER_DISPATCHER,
@@ -734,15 +734,17 @@ def ui_refresh_securities_history():
 @main_bp.route('/banking-transactions')
 def ui_transactions():
     page = request.args.get('page', 1, type=int)
-    sort_by = request.args.get('sort_by', 'date')
-    order = request.args.get('order', 'desc')
+    sort_by = request.args.get('sort_by', 'date') # noqa
+    order = request.args.get('order', 'desc') # noqa
     filter_account_id = request.args.get('filter_account_id', 'all')
     filter_type = request.args.get('filter_type', 'all')
 
     query = BankingTransaction.query.options(
         joinedload(BankingTransaction.account_ref),
         joinedload(BankingTransaction.to_account_ref),
-        joinedload(BankingTransaction.category_ref)
+        joinedload(BankingTransaction.category_ref),
+        # Eager load items and their categories to prevent N+1 queries in the template
+        joinedload(BankingTransaction.items).joinedload(TransactionItem.category)
     )
 
     if filter_account_id != 'all':
@@ -762,12 +764,103 @@ def ui_transactions():
 
     return render_template('transactions.html', transactions=pagination.items, pagination=pagination, sort_by=sort_by, order=order, filter_account_id=filter_account_id, filter_type=filter_type, accounts=accounts, unique_types=unique_types)
 
-@main_bp.route('/transactions/add')
+@main_bp.route('/transactions/add', methods=['GET', 'POST'])
 def ui_add_transaction_form():
-    # Placeholder
-    accounts = Account.query.order_by(Account.name).all()
-    categories = Category.query.order_by(Category.name).all()
-    return render_template('add_transaction.html', accounts=accounts, categories=categories)
+    if request.method == 'POST':
+        tx_type = request.form.get('transaction_type')
+        try:
+            if tx_type in ['expense', 'income']:
+                amount = Decimal(request.form.get('amount', '0'))
+                if amount <= 0: raise ValueError("Сумма должна быть положительной.")
+                
+                new_tx = BankingTransaction(
+                    transaction_type=tx_type,
+                    amount=amount,
+                    date=datetime.strptime(request.form.get('date'), '%Y-%m-%dT%H:%M'),
+                    description=request.form.get('description'),
+                    account_id=int(request.form.get('account_id')),
+                    category_id=int(request.form.get('category_id')) if request.form.get('category_id') else None
+                )
+                db.session.add(new_tx)
+
+            elif tx_type == 'transfer':
+                amount = Decimal(request.form.get('amount', '0'))
+                if amount <= 0: raise ValueError("Сумма должна быть положительной.")
+                
+                from_account_id = int(request.form.get('account_id'))
+                to_account_id = int(request.form.get('to_account_id'))
+                if from_account_id == to_account_id: raise ValueError("Счета для перевода должны отличаться.")
+
+                new_tx = BankingTransaction(
+                    transaction_type=tx_type,
+                    amount=amount,
+                    date=datetime.strptime(request.form.get('date'), '%Y-%m-%dT%H:%M'),
+                    description=request.form.get('description'),
+                    account_id=from_account_id,
+                    to_account_id=to_account_id
+                )
+                db.session.add(new_tx)
+
+            elif tx_type in ['purchase', 'manual_purchase']:
+                item_names = request.form.getlist('item_name[]')
+                item_quantities = request.form.getlist('item_quantity[]')
+                item_prices = request.form.getlist('item_price[]')
+                item_categories = request.form.getlist('item_category_id[]')
+
+                if not item_names: raise ValueError("В покупке должен быть хотя бы один товар.")
+
+                total_purchase_amount = sum(
+                    Decimal(qty) * Decimal(price) for qty, price in zip(item_quantities, item_prices)
+                )
+
+                purchase_tx = BankingTransaction(
+                    transaction_type='expense',
+                    amount=total_purchase_amount,
+                    date=datetime.strptime(request.form.get('date'), '%Y-%m-%dT%H:%M'),
+                    description=request.form.get('description'),
+                    merchant=request.form.get('merchant'),
+                    account_id=int(request.form.get('account_id'))
+                )
+                db.session.add(purchase_tx)
+                db.session.flush()
+
+                for i in range(len(item_names)):
+                    quantity = Decimal(item_quantities[i])
+                    price = Decimal(item_prices[i])
+                    category_id = int(item_categories[i]) if item_categories[i] else None
+                    
+                    item = TransactionItem(
+                        name=item_names[i],
+                        quantity=quantity,
+                        price=price,
+                        total=quantity * price,
+                        transaction_id=purchase_tx.id,
+                        category_id=category_id
+                    )
+                    db.session.add(item)
+            
+            else:
+                raise ValueError("Неизвестный тип транзакции.")
+
+            db.session.commit()
+            flash('Транзакция успешно добавлена.', 'success')
+            return redirect(url_for('main.ui_transactions'))
+
+        except (ValueError, InvalidOperation) as e:
+            db.session.rollback()
+            flash(f'Ошибка в данных: {e}', 'danger')
+    
+    accounts = Account.query.filter_by(is_active=True).order_by(Account.name).all()
+    expense_categories = Category.query.filter_by(type='expense').order_by(Category.name).all()
+    income_categories = Category.query.filter_by(type='income').order_by(Category.name).all()
+    
+    return render_template(
+        'add_transaction.html', 
+        accounts=accounts, 
+        expense_categories=expense_categories,
+        income_categories=income_categories,
+        now=datetime.now(timezone.utc)
+    )
 
 @main_bp.route('/transactions/<int:tx_id>/edit')
 def ui_edit_transaction_form(tx_id):
@@ -826,22 +919,66 @@ def ui_delete_account(account_id):
 
 @main_bp.route('/categories')
 def ui_categories():
-    # Placeholder - can be implemented later
-    return render_template('categories.html', categories=[])
+    categories_by_type = defaultdict(list)
+    all_categories = Category.query.order_by(Category.type, Category.name).all()
+    for cat in all_categories:
+        categories_by_type[cat.type].append(cat)
+    return render_template('categories.html', categories_by_type=categories_by_type)
 
-@main_bp.route('/categories/add')
+@main_bp.route('/categories/add', methods=['GET', 'POST'])
 def ui_add_category_form():
-    flash('Форма добавления категории еще не реализована.', 'info')
-    return redirect(url_for('main.ui_categories'))
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        cat_type = request.form.get('type', 'expense').strip()
+        if not name:
+            flash('Название категории не может быть пустым.', 'danger')
+        else:
+            existing = Category.query.filter_by(name=name, type=cat_type).first()
+            if existing:
+                flash(f'Категория "{name}" с типом "{cat_type}" уже существует.', 'danger')
+            else:
+                new_category = Category(name=name, type=cat_type)
+                db.session.add(new_category)
+                db.session.commit()
+                flash(f'Категория "{name}" успешно добавлена.', 'success')
+                return redirect(url_for('main.ui_categories'))
+    return render_template('add_edit_category.html', title="Добавить категорию", category=None)
 
-@main_bp.route('/categories/<int:category_id>/edit')
+@main_bp.route('/categories/<int:category_id>/edit', methods=['GET', 'POST'])
 def ui_edit_category_form(category_id):
-    flash(f'Форма редактирования категории {category_id} еще не реализована.', 'info')
-    return redirect(url_for('main.ui_categories'))
+    category = Category.query.get_or_404(category_id)
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        cat_type = request.form.get('type', 'expense').strip()
+        if not name:
+            flash('Название категории не может быть пустым.', 'danger')
+        else:
+            existing = Category.query.filter(
+                Category.id != category_id,
+                Category.name == name,
+                Category.type == cat_type
+            ).first()
+            if existing:
+                flash(f'Категория "{name}" с типом "{cat_type}" уже существует.', 'danger')
+            else:
+                category.name = name
+                category.type = cat_type
+                db.session.commit()
+                flash(f'Категория "{name}" успешно обновлена.', 'success')
+                return redirect(url_for('main.ui_categories'))
+    return render_template('add_edit_category.html', title="Редактировать категорию", category=category)
 
 @main_bp.route('/categories/<int:category_id>/delete', methods=['POST'])
 def ui_delete_category(category_id):
-    flash(f'Удаление категории {category_id} еще не реализовано.', 'info')
+    category = Category.query.get_or_404(category_id)
+    if BankingTransaction.query.filter_by(category_id=category_id).first() or \
+       TransactionItem.query.filter_by(category_id=category_id).first():
+        flash(f'Нельзя удалить категорию "{category.name}", так как она используется в транзакциях.', 'danger')
+        return redirect(url_for('main.ui_categories'))
+    
+    db.session.delete(category)
+    db.session.commit()
+    flash(f'Категория "{category.name}" успешно удалена.', 'success')
     return redirect(url_for('main.ui_categories'))
 
 @main_bp.route('/debts')

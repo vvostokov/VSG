@@ -4,8 +4,7 @@ from analytics_logic import (
     refresh_crypto_price_change_data,
     refresh_crypto_portfolio_history,
     refresh_securities_portfolio_history,
-    refresh_performance_chart_data,
-    refresh_market_leaders_cache
+    refresh_performance_chart_data
 )
 
 # Создаем группу команд 'analytics' для удобства
@@ -51,10 +50,3 @@ def refresh_all_command():
         success, message = func()
         print(message)
     print("\n--- ПОЛНОЕ ОБНОВЛЕНИЕ АНАЛИТИКИ ЗАВЕРШЕНО ---")
-
-@analytics_cli.command('refresh-market-leaders')
-def refresh_market_leaders_command():
-    """Обновляет кэш с данными о лидерах рынка."""
-    print("Запуск обновления кэша лидеров рынка...")
-    success, message = refresh_market_leaders_cache()
-    print(message)

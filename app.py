@@ -18,6 +18,9 @@ def create_app():
     app.config['UPLOAD_FOLDER'] = os.path.join(basedir, 'uploads')
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     app.config['ITEMS_PER_PAGE'] = 20
+    # --- FNS API Credentials for QR Code parsing ---
+    app.config['FNS_API_USERNAME'] = os.environ.get('FNS_API_USERNAME')
+    app.config['FNS_API_PASSWORD'] = os.environ.get('FNS_API_PASSWORD')
 
     # --- Initialize Extensions ---
     db.init_app(app)
@@ -36,11 +39,13 @@ def create_app():
     with app.app_context():
         # Import blueprints inside the context
         from main_routes import main_bp
+        from api_routes import api_bp
         from commands import analytics_cli
         from securities_logic import securities_bp
 
         app.register_blueprint(main_bp)
         app.register_blueprint(securities_bp)
+        app.register_blueprint(api_bp, url_prefix='/api')
         app.cli.add_command(analytics_cli)
 
     return app

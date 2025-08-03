@@ -148,6 +148,7 @@ class BankingTransaction(db.Model):
     transaction_type = db.Column(db.String(50), nullable=False)
     date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     description = db.Column(db.Text)
+    merchant = db.Column(db.String(255), nullable=True)
     account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=False)
     to_account_id = db.Column(db.Integer, db.ForeignKey('account.id'), nullable=True)
     category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
@@ -156,6 +157,9 @@ class BankingTransaction(db.Model):
     to_account_ref = db.relationship('Account', foreign_keys=[to_account_id], backref=db.backref('incoming_transfers', lazy='dynamic'))
     category_ref = db.relationship('Category', backref=db.backref('transactions', lazy='dynamic'))
     debt_ref = db.relationship('Debt', backref=db.backref('repayments', lazy='dynamic'))
+    
+    # Связь с элементами транзакции (для покупок)
+    items = db.relationship('TransactionItem', back_populates='transaction', cascade="all, delete-orphan")
 
     def __repr__(self):
         return f'<BankingTransaction {self.id} {self.transaction_type} {self.amount}>'
@@ -199,3 +203,20 @@ class JsonCache(db.Model):
 
     def __repr__(self):
         return f'<JsonCache {self.cache_key}>'
+
+class TransactionItem(db.Model):
+    __tablename__ = 'transaction_item'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    quantity = db.Column(db.Numeric(20, 3), nullable=False, default=1)
+    price = db.Column(db.Numeric(20, 2), nullable=False)
+    total = db.Column(db.Numeric(20, 2), nullable=False)
+    
+    transaction_id = db.Column(db.Integer, db.ForeignKey('banking_transaction.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    
+    transaction = db.relationship('BankingTransaction', back_populates='items')
+    category = db.relationship('Category')
+
+    def __repr__(self):
+        return f'<TransactionItem {self.name}>'

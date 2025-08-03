@@ -9,57 +9,41 @@
         <a href="{{ url_for('main.ui_add_category_form') }}" class="btn btn-primary">Добавить категорию</a>
     </div>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    {% if categories_by_type %}
+        {% for type, categories_list in categories_by_type.items()|sort %}
+            <h4 class="mt-4">{{ 'Доходы' if type == 'income' else 'Расходы' }}</h4>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Название</th>
+                            <th style="width: 250px;">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for category in categories_list %}
+                        <tr>
+                            <td>{{ category.name }}</td>
+                            <td>
+                                <a href="{{ url_for('main.ui_edit_category_form', category_id=category.id) }}" class="btn btn-sm btn-outline-secondary mr-1">
+                                    <i class="fas fa-pencil-alt"></i> Редактировать
+                                </a>
+                                <form action="{{ url_for('main.ui_delete_category', category_id=category.id) }}" method="POST" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить категорию \'{{ category.name }}\'? Это действие необратимо.');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="fas fa-trash"></i> Удалить
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-
-    {% if categories %}
-    <div class="table-responsive">
-        <table class="table table-striped table-hover">
-            <thead>
-                <tr>
-                    <th>Название</th>
-                    <th>Тип</th>
-                    <th>Действия</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for category in categories %}
-                <tr>
-                    <td>{{ category.name }}</td>
-                    <td>
-                        {% if category.type == 'income' %}
-                            <span class="badge bg-success">Доход</span>
-                        {% elif category.type == 'expense' %}
-                            <span class="badge bg-danger">Расход</span>
-                        {% else %}
-                            <span class="badge bg-secondary">{{ category.type }}</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <a href="{{ url_for('main.ui_edit_category_form', category_id=category.id) }}" class="btn btn-sm btn-outline-secondary me-1">
-                            <i class="bi bi-pencil"></i> Редактировать
-                        </a>
-                        <form action="{{ url_for('main.ui_delete_category', category_id=category.id) }}" method="POST" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить категорию \'{{ category.name }}\'? Это действие необратимо.');">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                <i class="bi bi-trash"></i> Удалить
-                            </button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+        {% endfor %}
     {% else %}
-    <p>Категорий пока нет. <a href="{{ url_for('main.ui_add_category_form') }}">Добавить новую?</a></p>
+        <div class="alert alert-light">
+            Категорий пока нет. <a href="{{ url_for('main.ui_add_category_form') }}" class="alert-link">Добавить новую?</a>
+        </div>
     {% endif %}
 </div>
 {% endblock %}
