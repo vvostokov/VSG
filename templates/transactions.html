@@ -40,6 +40,8 @@
                             <span class="badge bg-danger">Расход</span>
                         {% elif tx.transaction_type == 'transfer' %}
                             <span class="badge bg-info">Перевод</span>
+                        {% elif tx.transaction_type == 'exchange' %}
+                            <span class="badge bg-warning">Обмен</span>
                         {% else %}
                             <span class="badge bg-secondary">{{ tx.transaction_type }}</span>
                         {% endif %}
@@ -64,9 +66,14 @@
                         {% endif %}
                     </td>
                     <td class="text-end text-nowrap">
-                        <strong class="{{ 'text-success' if tx.transaction_type == 'income' else 'text-danger' if tx.transaction_type in ['expense', 'transfer'] else '' }}">
-                            {{ '-' if tx.transaction_type in ['expense', 'transfer'] else '+' }}{{ tx.amount|trim_zeros }} {{ tx.account_ref.currency }}
-                        </strong>
+                        {% if tx.transaction_type == 'exchange' %}
+                            <strong class="text-danger">-{{ tx.amount|trim_zeros }} {{ tx.account_ref.currency }}</strong><br>
+                            <strong class="text-success">+{{ tx.to_amount|trim_zeros }} {{ tx.to_account_ref.currency }}</strong>
+                        {% else %}
+                            <strong class="{{ 'text-success' if tx.transaction_type == 'income' else 'text-danger' if tx.transaction_type in ['expense', 'transfer'] else '' }}">
+                                {{ '-' if tx.transaction_type in ['expense', 'transfer'] else '+' }}{{ tx.amount|trim_zeros }} {{ tx.account_ref.currency }}
+                            </strong>
+                        {% endif %}
                     </td>
                     <td>
                         <a href="{{ url_for('main.ui_edit_transaction_form', tx_id=tx.id) }}" class="btn btn-sm btn-outline-secondary" title="Редактировать">

@@ -145,6 +145,7 @@ class BankingTransaction(db.Model):
     __tablename__ = 'banking_transaction'
     id = db.Column(db.Integer, primary_key=True)
     amount = db.Column(db.Numeric(20, 2), nullable=False)
+    to_amount = db.Column(db.Numeric(20, 2), nullable=True)
     transaction_type = db.Column(db.String(50), nullable=False)
     date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     description = db.Column(db.Text)

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Добавить обмен на {{ platform.name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Добавить транзакцию обмена</h2>
+    <h5 class="text-muted">Платформа: {{ platform.name }}</h5>
+    <hr>
+    <form method="POST" autocomplete="off">
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="timestamp"><strong>Дата и время</strong></label>
+                <input type="datetime-local" class="form-control" id="timestamp" name="timestamp" value="{{ now.strftime('%Y-%m-%dT%H:%M') }}" required>
+            </div>
+        </div>
+        <hr>
+        <h5 class="mb-3">Проданный актив</h5>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="asset1_ticker">Актив</label>
+                <select class="form-control" id="asset1_ticker" name="asset1_ticker" required>
+                    {% for asset in available_assets %}
+                    <option value="{{ asset }}">{{ asset }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="asset1_amount">Количество</label>
+                <input type="number" step="any" class="form-control" id="asset1_amount" name="asset1_amount" placeholder="Например, 0.5" required>
+            </div>
+        </div>
+        <hr>
+        <h5 class="mb-3">Купленный актив</h5>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="asset2_ticker">Актив</label>
+                <select class="form-control" id="asset2_ticker" name="asset2_ticker" required>
+                    {% for asset in available_assets %}
+                    <option value="{{ asset }}">{{ asset }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="asset2_amount">Количество</label>
+                <input type="number" step="any" class="form-control" id="asset2_amount" name="asset2_amount" placeholder="Например, 1500.75" required>
+            </div>
+        </div>
+        <hr>
+        <h5 class="mb-3">Комиссия (опционально)</h5>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="fee_amount">Сумма комиссии</label>
+                <input type="number" step="any" class="form-control" id="fee_amount" name="fee_amount" placeholder="Например, 0.01">
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="fee_currency">Валюта комиссии</label>
+                <select class="form-control" id="fee_currency" name="fee_currency">
+                    <option value="">-- Выберите --</option>
+                    {% for asset in available_assets %}
+                    <option value="{{ asset }}">{{ asset }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-group mb-3">
+            <label for="description">Описание / Комментарий</label>
+            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary mt-3">Сохранить обмен</button>
+        <a href="{{ cancel_url }}" class="btn btn-secondary mt-3">Отмена</a>
+    </form>
+</div>
+{% endblock %}

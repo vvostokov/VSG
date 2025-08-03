@@ -161,6 +161,9 @@ def refresh_crypto_portfolio_history():
             elif tx.type == 'sell':
                 if tx.asset1_ticker: holdings[tx.asset1_ticker] -= tx.asset1_amount
                 if tx.asset2_ticker: holdings[tx.asset2_ticker] += tx.asset2_amount
+            elif tx.type == 'exchange':
+                if tx.asset1_ticker: holdings[tx.asset1_ticker] -= tx.asset1_amount
+                if tx.asset2_ticker: holdings[tx.asset2_ticker] += tx.asset2_amount
             elif tx.type in ['deposit', 'transfer']: # Учитываем и переводы
                 if tx.asset1_ticker: holdings[tx.asset1_ticker] += tx.asset1_amount
             elif tx.type == 'withdrawal':

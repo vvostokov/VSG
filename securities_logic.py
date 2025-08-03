@@ -637,8 +637,13 @@ def ui_calculate_broker_assets_from_transactions(platform_id):
 
         holdings = defaultdict(lambda: {'quantity': Decimal(0)})
         for tx in transactions:
-            if tx.asset1_ticker:
-                holdings[tx.asset1_ticker]['quantity'] += tx.asset1_amount if tx.type == 'buy' else -tx.asset1_amount
+            if tx.type == 'buy' and tx.asset1_ticker:
+                holdings[tx.asset1_ticker]['quantity'] += tx.asset1_amount
+            elif tx.type == 'sell' and tx.asset1_ticker:
+                holdings[tx.asset1_ticker]['quantity'] -= tx.asset1_amount
+            elif tx.type == 'exchange':
+                if tx.asset1_ticker: holdings[tx.asset1_ticker]['quantity'] -= tx.asset1_amount
+                if tx.asset2_ticker: holdings[tx.asset2_ticker]['quantity'] += tx.asset2_amount
         
         final_holdings_by_isin = {isin: data for isin, data in holdings.items() if data['quantity'] > 0}
         if not final_holdings_by_isin:

@@ -528,6 +528,51 @@ def ui_delete_investment_asset(asset_id):
     flash(f'Удаление крипто-актива {asset.ticker} еще не реализовано.', 'info')
     return redirect(url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id))
 
+@main_bp.route('/platforms/<int:platform_id>/transactions/add_exchange', methods=['GET', 'POST'])
+def ui_add_exchange_transaction_form(platform_id):
+    """Обрабатывает добавление транзакции обмена для крипто-платформы."""
+    platform = InvestmentPlatform.query.get_or_404(platform_id)
+    # Собираем все возможные активы для выбора в форме
+    asset_tickers = {asset.ticker for asset in platform.assets.filter(InvestmentAsset.quantity > 0).all()}
+    try:
+        manual_balances = json.loads(platform.manual_earn_balances_json)
+        asset_tickers.update(manual_balances.keys())
+    except (json.JSONDecodeError, TypeError):
+        pass
+    asset_tickers.update(['USDT', 'USDC', 'BTC', 'ETH']) # Добавляем основные валюты
+    available_assets = sorted(list(asset_tickers))
+
+    if request.method == 'POST':
+        try:
+            asset1_ticker = request.form.get('asset1_ticker')
+            asset1_amount = Decimal(request.form.get('asset1_amount'))
+            asset2_ticker = request.form.get('asset2_ticker')
+            asset2_amount = Decimal(request.form.get('asset2_amount'))
+            fee_amount = Decimal(request.form.get('fee_amount', '0'))
+            fee_currency = request.form.get('fee_currency')
+            timestamp = datetime.strptime(request.form.get('timestamp'), '%Y-%m-%dT%H:%M').replace(tzinfo=timezone.utc)
+
+            if not all([asset1_ticker, asset1_amount, asset2_ticker, asset2_amount]):
+                raise ValueError("Все поля активов и их количества обязательны.")
+            if asset1_ticker == asset2_ticker:
+                raise ValueError("Активы для обмена должны быть разными.")
+
+            new_tx = Transaction(
+                platform_id=platform.id, timestamp=timestamp, type='exchange', raw_type='Manual Exchange',
+                asset1_ticker=asset1_ticker, asset1_amount=asset1_amount,
+                asset2_ticker=asset2_ticker, asset2_amount=asset2_amount,
+                fee_amount=fee_amount, fee_currency=fee_currency if fee_amount > 0 else None,
+                description=request.form.get('description')
+            )
+            db.session.add(new_tx)
+            db.session.commit()
+            flash('Транзакция обмена успешно добавлена.', 'success')
+            return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
+        except (ValueError, InvalidOperation) as e:
+            db.session.rollback()
+            flash(f'Ошибка в данных: {e}', 'danger')
+    
+    return render_template('add_exchange_transaction.html', platform=platform, available_assets=available_assets, now=datetime.now(timezone.utc), cancel_url=url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
 # --- Routes that were copied from app.py ---
 # (All other routes like /accounts, /transactions, /categories, /debts, /crypto-assets, etc. go here)
@@ -801,6 +846,27 @@ def ui_add_transaction_form():
                 )
                 db.session.add(new_tx)
 
+            elif tx_type == 'exchange':
+                from_amount = Decimal(request.form.get('amount', '0'))
+                to_amount = Decimal(request.form.get('to_amount', '0'))
+                if from_amount <= 0 or to_amount <= 0:
+                    raise ValueError("Суммы для обмена должны быть положительными.")
+                
+                from_account_id = int(request.form.get('account_id'))
+                to_account_id = int(request.form.get('to_account_id'))
+                if from_account_id == to_account_id:
+                    raise ValueError("Счета для обмена должны отличаться.")
+
+                new_tx = BankingTransaction(
+                    transaction_type=tx_type,
+                    amount=from_amount,
+                    to_amount=to_amount,
+                    date=datetime.strptime(request.form.get('date'), '%Y-%m-%dT%H:%M'),
+                    description=request.form.get('description'),
+                    account_id=from_account_id,
+                    to_account_id=to_account_id
+                )
+                db.session.add(new_tx)
             elif tx_type in ['purchase', 'manual_purchase']:
                 item_names = request.form.getlist('item_name[]')
                 item_quantities = request.form.getlist('item_quantity[]')
