@@ -18,6 +18,7 @@ et_xmlfile==2.0.0
 Flask==3.1.1
 Flask-Migrate==4.1.0
 Flask-SQLAlchemy==3.1.1
+gunicorn
 frozenlist==1.7.0
 greenlet==3.2.2
 h11==0.16.0
