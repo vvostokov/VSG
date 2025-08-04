@@ -109,10 +109,16 @@ class Account(db.Model):
     balance = db.Column(db.Numeric(20, 2), nullable=False, default=0.0)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     notes = db.Column(db.Text)
-    # Добавленные поля для вкладов и накопительных счетов
+    # Поля для вкладов
     interest_rate = db.Column(db.Numeric(5, 2), nullable=True)
     start_date = db.Column(db.Date, nullable=True)
     end_date = db.Column(db.Date, nullable=True)
+    # Поля для кредитных карт
+    credit_limit = db.Column(db.Numeric(20, 2), nullable=True)
+    grace_period_days = db.Column(db.Integer, nullable=True)
+    # Связь с банком
+    bank_id = db.Column(db.Integer, db.ForeignKey('bank.id'), nullable=True)
+    bank = db.relationship('Bank', back_populates='accounts')
 
     def __repr__(self):
         return f'<Account {self.name}>'
@@ -121,7 +127,12 @@ class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False)
     type = db.Column(db.String(50), nullable=False)
-    __table_args__ = (db.UniqueConstraint('name', 'type', name='_name_type_uc'),)
+    parent_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=True)
+    
+    parent = db.relationship('Category', remote_side=[id], back_populates='subcategories')
+    subcategories = db.relationship('Category', back_populates='parent', cascade="all, delete-orphan")
+    
+    __table_args__ = (db.UniqueConstraint('name', 'parent_id', 'type', name='_name_parent_type_uc'),)
 
     def __repr__(self):
         return f'<Category {self.name} ({self.type})>'
@@ -221,3 +232,11 @@ class TransactionItem(db.Model):
 
     def __repr__(self):
         return f'<TransactionItem {self.name}>'
+
+class Bank(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False, unique=True)
+    accounts = db.relationship('Account', back_populates='bank', lazy='dynamic')
+
+    def __repr__(self):
+        return f'<Bank {self.name}>'

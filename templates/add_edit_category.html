@@ -18,6 +18,15 @@
                 <option value="income" {% if category and category.type == 'income' %}selected{% endif %}>Доход</option>
             </select>
         </div>
+        <div class="form-group mb-3">
+            <label for="parent_id">Родительская категория (оставьте пустым для создания основной категории)</label>
+            <select class="form-control" id="parent_id" name="parent_id">
+                <option value="">-- Нет --</option>
+                {% for parent_cat in parent_categories %}
+                <option value="{{ parent_cat.id }}" {% if category and category.parent_id == parent_cat.id %}selected{% endif %}>{{ parent_cat.name }} ({{ parent_cat.type }})</option>
+                {% endfor %}
+            </select>
+        </div>
         <button type="submit" class="btn btn-primary">Сохранить</button>
         <a href="{{ url_for('main.ui_categories') }}" class="btn btn-secondary">Отмена</a>
     </form>

@@ -40,13 +40,14 @@ def create_app():
         # Import blueprints inside the context
         from main_routes import main_bp
         from api_routes import api_bp
-        from commands import analytics_cli
+        from commands import analytics_cli, seed_cli
         from securities_logic import securities_bp
 
         app.register_blueprint(main_bp)
         app.register_blueprint(securities_bp)
         app.register_blueprint(api_bp, url_prefix='/api')
         app.cli.add_command(analytics_cli)
+        app.cli.add_command(seed_cli)
 
     return app
 

@@ -9,37 +9,32 @@
         <a href="{{ url_for('main.ui_add_category_form') }}" class="btn btn-primary">Добавить категорию</a>
     </div>
 
-    {% if categories_by_type %}
-        {% for type, categories_list in categories_by_type.items()|sort %}
-            <h4 class="mt-4">{{ 'Доходы' if type == 'income' else 'Расходы' }}</h4>
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
-                    <thead>
-                        <tr>
-                            <th>Название</th>
-                            <th style="width: 250px;">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for category in categories_list %}
-                        <tr>
-                            <td>{{ category.name }}</td>
-                            <td>
-                                <a href="{{ url_for('main.ui_edit_category_form', category_id=category.id) }}" class="btn btn-sm btn-outline-secondary mr-1">
-                                    <i class="fas fa-pencil-alt"></i> Редактировать
-                                </a>
-                                <form action="{{ url_for('main.ui_delete_category', category_id=category.id) }}" method="POST" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить категорию \'{{ category.name }}\'? Это действие необратимо.');">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">
-                                        <i class="fas fa-trash"></i> Удалить
-                                    </button>
-                                </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        {% endfor %}
+    {% macro render_category_tree(categories) %}
+        <ul class="list-group">
+            {% for category in categories %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                {{ category.name }}
+                <span>
+                    <a href="{{ url_for('main.ui_edit_category_form', category_id=category.id) }}" class="btn btn-sm btn-outline-secondary mr-1"><i class="fas fa-pencil-alt"></i></a>
+                    <form action="{{ url_for('main.ui_delete_category', category_id=category.id) }}" method="POST" style="display: inline;" onsubmit="return confirm('Вы уверены, что хотите удалить категорию \'{{ category.name }}\' и все ее подкатегории?');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                    </form>
+                </span>
+            </li>
+            {% if category.subcategories %}
+                <li class="list-group-item" style="padding-left: 40px; border-top: 0; padding-top: 0;">
+                    {{ render_category_tree(category.subcategories) }}
+                </li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    {% endmacro %}
+
+    {% if expense_parents or income_parents %}
+        <h4 class="mt-4">Расходы</h4>
+        {{ render_category_tree(expense_parents) }}
+        <h4 class="mt-4">Доходы</h4>
+        {{ render_category_tree(income_parents) }}
     {% else %}
         <div class="alert alert-light">
             Категорий пока нет. <a href="{{ url_for('main.ui_add_category_form') }}" class="alert-link">Добавить новую?</a>

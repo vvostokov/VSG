@@ -27,7 +27,7 @@
                 <li class="nav-item {% if request.endpoint == 'main.index' %}active{% endif %}">
                     <a class="nav-link" href="{{ url_for('main.index') }}">Главная</a>
                 </li>
-                {% set banking_endpoints = ['main.ui_accounts', 'main.ui_add_account_form', 'main.ui_edit_account_form', 'main.ui_transactions', 'main.ui_add_transaction_form', 'main.ui_edit_transaction_form', 'main.ui_debts', 'main.ui_add_debt_form', 'main.ui_repay_debt_form', 'main.ui_analytics_overview', 'main.ui_cashback_rules', 'main.ui_add_cashback_rule_form', 'main.ui_edit_cashback_rule_form', 'main.ui_categories', 'main.ui_add_category_form', 'main.ui_edit_category_form'] %}
+                {% set banking_endpoints = ['main.ui_accounts', 'main.ui_add_account_form', 'main.ui_edit_account_form', 'main.ui_transactions', 'main.ui_add_transaction_form', 'main.ui_edit_transaction_form', 'main.ui_debts', 'main.ui_add_debt_form', 'main.ui_repay_debt_form', 'main.ui_analytics_overview', 'main.ui_cashback_rules', 'main.ui_add_cashback_rule_form', 'main.ui_edit_cashback_rule_form', 'main.ui_categories', 'main.ui_add_category_form', 'main.ui_edit_category_form', 'main.ui_banks', 'main.ui_add_bank', 'main.ui_edit_bank'] %}
                 <li class="nav-item dropdown {% if request.endpoint in banking_endpoints %}active{% endif %}">
                     <a class="nav-link dropdown-toggle" href="#" id="bankingDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                         Банкинг
@@ -36,6 +36,7 @@
                         <a class="dropdown-item" href="{{ url_for('main.ui_accounts') }}">Счета</a>
                         <a class="dropdown-item" href="{{ url_for('main.ui_transactions') }}">Банковские операции</a>
                         <a class="dropdown-item" href="{{ url_for('main.ui_categories') }}">Категории</a>
+                        <a class="dropdown-item" href="{{ url_for('main.ui_banks') }}">Банки</a>
                         <div class="dropdown-divider"></div>
                         <a class="dropdown-item" href="{{ url_for('main.ui_debts') }}">Долги</a>
                         <a class="dropdown-item" href="{{ url_for('main.ui_cashback_rules') }}">Правила кэшбэка</a>

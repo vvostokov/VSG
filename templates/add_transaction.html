@@ -129,8 +129,13 @@
         <div class="col-md-3">
             <select name="item_category_id[]" class="form-select">
                 <option value="">-- Без категории --</option>
-                {% for cat in expense_categories %}
-                <option value="{{ cat.id }}">{{ cat.name }}</option>
+                {% for parent_cat in expense_categories %}
+                    <optgroup label="{{ parent_cat.name }}">
+                        <option value="{{ parent_cat.id }}">{{ parent_cat.name }} (основная)</option>
+                        {% for sub_cat in parent_cat.subcategories %}
+                            <option value="{{ sub_cat.id }}">{{ sub_cat.name }}</option>
+                        {% endfor %}
+                    </optgroup>
                 {% endfor %}
             </select>
         </div>
@@ -144,14 +149,24 @@
 <div style="display: none;">
     <select id="income-categories-source">
         <option value="">-- Без категории --</option>
-        {% for cat in income_categories %}
-        <option value="{{ cat.id }}">{{ cat.name }}</option>
+        {% for parent_cat in income_categories %}
+            <optgroup label="{{ parent_cat.name }}">
+                <option value="{{ parent_cat.id }}">{{ parent_cat.name }} (основная)</option>
+                {% for sub_cat in parent_cat.subcategories %}
+                    <option value="{{ sub_cat.id }}">{{ sub_cat.name }}</option>
+                {% endfor %}
+            </optgroup>
         {% endfor %}
     </select>
     <select id="expense-categories-source">
         <option value="">-- Без категории --</option>
-        {% for cat in expense_categories %}
-        <option value="{{ cat.id }}">{{ cat.name }}</option>
+        {% for parent_cat in expense_categories %}
+            <optgroup label="{{ parent_cat.name }}">
+                <option value="{{ parent_cat.id }}">{{ parent_cat.name }} (основная)</option>
+                {% for sub_cat in parent_cat.subcategories %}
+                    <option value="{{ sub_cat.id }}">{{ sub_cat.name }}</option>
+                {% endfor %}
+            </optgroup>
         {% endfor %}
     </select>
 </div>

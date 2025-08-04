@@ -6,69 +6,67 @@
 <div class="container mt-4">
     <h2>{{ title }}</h2>
     <hr>
-    <form action="{{ form_action_url }}" method="POST">
-        <div class="form-group">
-            <label for="name">Название счета *</label>
-            <input type="text" class="form-control" id="name" name="name" value="{{ account.name if account else '' }}" required>
-            <small class="form-text text-muted">Например, "Карта Сбербанка", "Наличные в кошельке", "Вклад в Альфе".</small>
-        </div>
-
-        <div class="form-group">
-            <label for="account_type">Тип счета *</label>
-            <select class="form-control" id="account_type" name="account_type" required>
-                <option value="bank_card" {% if account and account.account_type == 'bank_card' %}selected{% endif %}>Дебетовая карта</option>
-                <option value="bank_account" {% if account and account.account_type == 'bank_account' %}selected{% endif %}>Накопительный счет</option>
-                <option value="deposit" {% if account and account.account_type == 'deposit' %}selected{% endif %}>Вклад</option>
-                <option value="cash" {% if account and account.account_type == 'cash' %}selected{% endif %}>Наличные</option>
-                <option value="e-wallet" {% if account and account.account_type == 'e-wallet' %}selected{% endif %}>Электронный кошелек</option>
-                <option value="other" {% if account and account.account_type == 'other' %}selected{% endif %}>Другое</option>
-            </select>
-        </div>
-
+    <form method="POST" action="{{ form_action_url }}" autocomplete="off">
         <div class="row">
-            <div class="form-group col-md-6">
-                <label for="balance">Текущий баланс *</label>
-                <input type="number" step="0.01" class="form-control" id="balance" name="balance" value="{{ account.balance if account else '0.00' }}" required>
+            <div class="col-md-6 mb-3">
+                <label for="name">Название счета</label>
+                <input type="text" class="form-control" id="name" name="name" value="{{ account.name if account else '' }}" required>
             </div>
-            <div class="form-group col-md-6">
-                <label for="currency">Валюта *</label>
-                <select class="form-control" id="currency" name="currency" required>
-                    <option value="RUB" {% if account and account.currency == 'RUB' %}selected{% endif %}>RUB</option>
-                    <option value="USD" {% if account and account.currency == 'USD' %}selected{% endif %}>USD</option>
-                    <option value="EUR" {% if account and account.currency == 'EUR' %}selected{% endif %}>EUR</option>
+            <div class="col-md-6 mb-3">
+                <label for="account_type">Тип счета</label>
+                <select class="form-control" id="account_type" name="account_type" required>
+                    <option value="bank_account" {% if account and account.account_type == 'bank_account' %}selected{% endif %}>Банковский счет</option>
+                    <option value="bank_card" {% if account and account.account_type == 'bank_card' %}selected{% endif %}>Банковская карта</option>
+                    <option value="deposit" {% if account and account.account_type == 'deposit' %}selected{% endif %}>Вклад</option>
+                    <option value="credit" {% if account and account.account_type == 'credit' %}selected{% endif %}>Кредитная карта</option>
+                    <option value="cash" {% if account and account.account_type == 'cash' %}selected{% endif %}>Наличные</option>
                 </select>
             </div>
         </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label for="bank_id">Банк</label>
+                <select class="form-control" id="bank_id" name="bank_id">
+                    <option value="">-- Не указан --</option>
+                    {% for bank in banks %}
+                    <option value="{{ bank.id }}" {% if account and account.bank_id == bank.id %}selected{% endif %}>{{ bank.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="currency">Валюта</label>
+                <input type="text" class="form-control" id="currency" name="currency" value="{{ account.currency if account else 'RUB' }}" required>
+            </div>
+        </div>
+        <div class="form-group mb-3">
+            <label for="balance" id="balance_label">Текущий баланс</label>
+            <input type="number" step="0.01" class="form-control" id="balance" name="balance" value="{{ account.balance if account else '0.00' }}" required>
+            <small id="balance_help" class="form-text text-muted">Для кредитных карт укажите текущую сумму задолженности.</small>
+        </div>
 
-        <!-- Поля, специфичные для вклада -->
-        <div id="deposit-fields" style="display: none;">
+        <!-- Поля для кредитных карт -->
+        <div id="credit-fields" style="display: none;">
             <div class="row">
-                <div class="form-group col-md-4">
-                    <label for="interest_rate">Процентная ставка (% годовых)</label>
-                    <input type="number" step="0.01" class="form-control" id="interest_rate" name="interest_rate" value="{{ account.interest_rate if account and account.interest_rate else '' }}">
+                <div class="col-md-6 mb-3">
+                    <label for="credit_limit">Кредитный лимит</p>
+                    <input type="number" step="0.01" class="form-control" id="credit_limit" name="credit_limit" value="{{ account.credit_limit if account else '' }}">
                 </div>
-                <div class="form-group col-md-4">
-                    <label for="start_date">Дата открытия</label>
-                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ account.start_date.strftime('%Y-%m-%d') if account and account.start_date else '' }}">
-                </div>
-                <div class="form-group col-md-4">
-                    <label for="end_date">Дата закрытия</label>
-                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ account.end_date.strftime('%Y-%m-%d') if account and account.end_date else '' }}">
+                <div class="col-md-6 mb-3">
+                    <label for="grace_period_days">Льготный период (дней)</p>
+                    <input type="number" class="form-control" id="grace_period_days" name="grace_period_days" value="{{ account.grace_period_days if account else '' }}">
                 </div>
             </div>
         </div>
 
-        <div class="form-group">
+        <div class="form-group mb-3">
             <label for="notes">Заметки</label>
             <textarea class="form-control" id="notes" name="notes" rows="3">{{ account.notes if account else '' }}</textarea>
         </div>
-
-        <div class="form-group form-check">
+        <div class="form-check mb-3">
             <input type="checkbox" class="form-check-input" id="is_active" name="is_active" {% if not account or account.is_active %}checked{% endif %}>
             <label class="form-check-label" for="is_active">Счет активен</label>
         </div>
-
-        <button type="submit" class="btn btn-success">Сохранить</button>
+        <button type="submit" class="btn btn-primary">Сохранить</button>
         <a href="{{ url_for('main.ui_accounts') }}" class="btn btn-secondary">Отмена</a>
     </form>
 </div>
@@ -78,32 +76,19 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const accountTypeSelect = document.getElementById('account_type');
-    const depositFields = document.getElementById('deposit-fields');
+    const creditFields = document.getElementById('credit-fields');
+    const balanceLabel = document.getElementById('balance_label');
+    const balanceHelp = document.getElementById('balance_help');
 
-    function toggleDepositFields() {
-        if (accountTypeSelect.value === 'deposit' || accountTypeSelect.value === 'bank_account') {
-            depositFields.style.display = 'block';
-            // Для накопительного счета скрываем даты, оставляем только ставку
-            document.getElementById('start_date').closest('.col-md-4').style.display = accountTypeSelect.value === 'deposit' ? 'block' : 'none';
-            document.getElementById('end_date').closest('.col-md-4').style.display = accountTypeSelect.value === 'deposit' ? 'block' : 'none';
-        } else {
-            depositFields.style.display = 'none';
-        }
+    function toggleCreditFields() {
+        const isCredit = accountTypeSelect.value === 'credit';
+        creditFields.style.display = isCredit ? 'block' : 'none';
+        balanceLabel.textContent = isCredit ? 'Текущая задолженность' : 'Текущий баланс';
+        balanceHelp.style.display = isCredit ? 'block' : 'none';
     }
 
-    // Initial check on page load
-    toggleDepositFields();
-
-    // Add event listener
-    accountTypeSelect.addEventListener('change', toggleDepositFields);
+    accountTypeSelect.addEventListener('change', toggleCreditFields);
+    toggleCreditFields(); // Initial check on page load
 });
 </script>
 {% endblock %}
-
-```
-
-After creating this file, the "Добавить счет" button on your `/accounts` page will work correctly and display the form.
-
-<!--
-[PROMPT_SUGGESTION]Now, can you help me implement the logic for adding and editing banking transactions (income, expense, transfer)?[/PROMPT_SUGGESTION]
-[PROMPT_SUGGESTION]How can I improve the display of transactions in `templates/transactions.html` to make transfers between accounts more intuitive?[/PROMPT_SUGGESTION]

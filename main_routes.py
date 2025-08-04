@@ -6,7 +6,7 @@ from flask import (Blueprint, render_template, request, redirect, url_for, flash
 from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import joinedload
 from sqlalchemy import func, asc, desc
-from models import Debt, Account, BankingTransaction
+from models import Debt, Account, BankingTransaction, Bank
 from extensions import db # noqa
 from models import (
     InvestmentPlatform, InvestmentAsset, Transaction, Account, Category, Debt,
@@ -44,6 +44,7 @@ def _populate_account_from_form(account: Account, form_data):
     account.balance = Decimal(form_data.get('balance', '0'))
     account.is_active = 'is_active' in form_data
     interest_rate_str = form_data.get('interest_rate')
+    account.bank_id = int(form_data.get('bank_id')) if form_data.get('bank_id') else None
     account.interest_rate = Decimal(interest_rate_str) if interest_rate_str and interest_rate_str.strip() else None
     start_date_str = form_data.get('start_date')
     account.start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str and start_date_str.strip() else None
@@ -51,6 +52,9 @@ def _populate_account_from_form(account: Account, form_data):
     account.end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str and end_date_str.strip() else None
     account.notes = form_data.get('notes')
 
+    if account.account_type == 'credit':
+        account.credit_limit = Decimal(form_data.get('credit_limit', '0'))
+        account.grace_period_days = int(form_data.get('grace_period_days', '0'))
 def _calculate_portfolio_changes(history_records: list[PortfolioHistory]) -> dict:
     """Рассчитывает процентные изменения портфеля для разных периодов."""
     changes = {'1d': None, '7d': None, '30d': None, '180d': None, '365d': None}
@@ -814,10 +818,39 @@ def ui_add_transaction_form():
     if request.method == 'POST':
         tx_type = request.form.get('transaction_type')
         try:
-            if tx_type in ['expense', 'income']:
+            account_id = int(request.form.get('account_id'))
+            account = Account.query.get(account_id)
+            if not account:
+                raise ValueError("Счет не найден.")
+
+            if tx_type == 'expense':
                 amount = Decimal(request.form.get('amount', '0'))
                 if amount <= 0: raise ValueError("Сумма должна быть положительной.")
                 
+                if account.account_type == 'credit':
+                    account.balance += amount
+                else:
+                    account.balance -= amount
+
+                new_tx = BankingTransaction(
+                    transaction_type=tx_type,
+                    amount=amount,
+                    date=datetime.strptime(request.form.get('date'), '%Y-%m-%dT%H:%M'),
+                    description=request.form.get('description'),
+                    account_id=int(request.form.get('account_id')),
+                    category_id=int(request.form.get('category_id')) if request.form.get('category_id') else None
+                )
+                db.session.add(new_tx)
+            
+            elif tx_type == 'income':
+                amount = Decimal(request.form.get('amount', '0'))
+                if amount <= 0: raise ValueError("Сумма должна быть положительной.")
+                
+                if account.account_type == 'credit':
+                    account.balance -= amount
+                else:
+                    account.balance += amount
+
                 new_tx = BankingTransaction(
                     transaction_type=tx_type,
                     amount=amount,
@@ -835,6 +868,21 @@ def ui_add_transaction_form():
                 from_account_id = int(request.form.get('account_id'))
                 to_account_id = int(request.form.get('to_account_id'))
                 if from_account_id == to_account_id: raise ValueError("Счета для перевода должны отличаться.")
+
+                from_account = account # Already fetched
+                to_account = Account.query.get(to_account_id)
+                if not to_account:
+                    raise ValueError("Счет зачисления не найден.")
+
+                if from_account.account_type == 'credit':
+                    from_account.balance += amount
+                else:
+                    from_account.balance -= amount
+                
+                if to_account.account_type == 'credit':
+                    to_account.balance -= amount
+                else:
+                    to_account.balance += amount
 
                 new_tx = BankingTransaction(
                     transaction_type=tx_type,
@@ -857,6 +905,12 @@ def ui_add_transaction_form():
                 if from_account_id == to_account_id:
                     raise ValueError("Счета для обмена должны отличаться.")
 
+                from_account = account # Already fetched
+                to_account = Account.query.get(to_account_id)
+                if not to_account: raise ValueError("Счет зачисления не найден.")
+                from_account.balance -= from_amount
+                to_account.balance += to_amount
+
                 new_tx = BankingTransaction(
                     transaction_type=tx_type,
                     amount=from_amount,
@@ -878,6 +932,8 @@ def ui_add_transaction_form():
                 total_purchase_amount = sum(
                     Decimal(qty) * Decimal(price) for qty, price in zip(item_quantities, item_prices)
                 )
+
+                account.balance -= total_purchase_amount
 
                 purchase_tx = BankingTransaction(
                     transaction_type='expense',
@@ -917,8 +973,8 @@ def ui_add_transaction_form():
             flash(f'Ошибка в данных: {e}', 'danger')
     
     accounts = Account.query.filter_by(is_active=True).order_by(Account.name).all()
-    expense_categories = Category.query.filter_by(type='expense').order_by(Category.name).all()
-    income_categories = Category.query.filter_by(type='income').order_by(Category.name).all()
+    expense_categories = Category.query.filter_by(type='expense', parent_id=None).order_by(Category.name).options(joinedload(Category.subcategories)).all()
+    income_categories = Category.query.filter_by(type='income', parent_id=None).order_by(Category.name).options(joinedload(Category.subcategories)).all()
     
     return render_template(
         'add_transaction.html', 
@@ -939,6 +995,7 @@ def ui_edit_transaction_form(tx_id):
 @main_bp.route('/accounts/add', methods=['GET', 'POST'])
 def add_account():
     """Обрабатывает добавление нового банковского счета (GET-форма, POST-создание)."""
+    banks = Bank.query.order_by(Bank.name).all()
     if request.method == 'POST':
         try:
             new_account = Account()
@@ -949,9 +1006,9 @@ def add_account():
             return redirect(url_for('main.ui_accounts'))
         except (InvalidOperation, ValueError) as e:
             flash(f'Ошибка в данных: {e}', 'danger')
-            return render_template('add_edit_account.html', form_action_url=url_for('main.add_account'), account=request.form, title="Добавить новый счет")
+            return render_template('add_edit_account.html', form_action_url=url_for('main.add_account'), account=request.form, title="Добавить новый счет", banks=banks)
     # GET request
-    return render_template('add_edit_account.html', form_action_url=url_for('main.add_account'), account=None, title="Добавить новый счет")
+    return render_template('add_edit_account.html', form_action_url=url_for('main.add_account'), account=None, title="Добавить новый счет", banks=banks)
 
 @main_bp.route('/accounts/<int:account_id>/edit', methods=['GET', 'POST'])
 def ui_edit_account_form(account_id):
@@ -967,8 +1024,10 @@ def ui_edit_account_form(account_id):
             # Передаем измененные данные формы обратно в шаблон
             form_data = request.form.to_dict()
             form_data['id'] = account_id # Сохраняем id для action в форме
-            return render_template('add_edit_account.html', form_action_url=url_for('main.ui_edit_account_form', account_id=account_id), account=form_data, title="Редактировать счет")
-    return render_template('add_edit_account.html', form_action_url=url_for('main.ui_edit_account_form', account_id=account_id), account=account, title="Редактировать счет")
+            banks = Bank.query.order_by(Bank.name).all()
+            return render_template('add_edit_account.html', form_action_url=url_for('main.ui_edit_account_form', account_id=account_id), account=form_data, title="Редактировать счет", banks=banks)
+    banks = Bank.query.order_by(Bank.name).all()
+    return render_template('add_edit_account.html', form_action_url=url_for('main.ui_edit_account_form', account_id=account_id), account=account, title="Редактировать счет", banks=banks)
 
 @main_bp.route('/accounts/<int:account_id>/delete', methods=['POST'])
 def ui_delete_account(account_id):
@@ -983,19 +1042,70 @@ def ui_delete_account(account_id):
     flash(f'Счет "{account.name}" успешно удален.', 'success')
     return redirect(url_for('main.ui_accounts'))
 
+@main_bp.route('/banks')
+def ui_banks():
+    """Отображает страницу со списком всех банков."""
+    banks = Bank.query.order_by(Bank.name).all()
+    return render_template('banks.html', banks=banks)
+
+@main_bp.route('/banks/add', methods=['GET', 'POST'])
+def ui_add_bank():
+    """Обрабатывает добавление нового банка."""
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            flash('Название банка не может быть пустым.', 'danger')
+        elif Bank.query.filter_by(name=name).first():
+            flash(f'Банк с названием "{name}" уже существует.', 'danger')
+        else:
+            db.session.add(Bank(name=name))
+            db.session.commit()
+            flash(f'Банк "{name}" успешно добавлен.', 'success')
+            return redirect(url_for('main.ui_banks'))
+    return render_template('add_edit_bank.html', title="Добавить банк", bank=None)
+
+@main_bp.route('/banks/<int:bank_id>/edit', methods=['GET', 'POST'])
+def ui_edit_bank(bank_id):
+    """Обрабатывает редактирование банка."""
+    bank = Bank.query.get_or_404(bank_id)
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        if not name:
+            flash('Название банка не может быть пустым.', 'danger')
+        elif Bank.query.filter(Bank.id != bank_id, Bank.name == name).first():
+            flash(f'Банк с названием "{name}" уже существует.', 'danger')
+        else:
+            bank.name = name
+            db.session.commit()
+            flash('Название банка успешно обновлено.', 'success')
+            return redirect(url_for('main.ui_banks'))
+    return render_template('add_edit_bank.html', title="Редактировать банк", bank=bank)
+
+@main_bp.route('/banks/<int:bank_id>/delete', methods=['POST'])
+def ui_delete_bank(bank_id):
+    """Обрабатывает удаление банка."""
+    bank = Bank.query.get_or_404(bank_id)
+    if bank.accounts.first():
+        flash(f'Нельзя удалить банк "{bank.name}", так как с ним связаны счета. Сначала измените или удалите связанные счета.', 'danger')
+        return redirect(url_for('main.ui_banks'))
+    
+    db.session.delete(bank)
+    db.session.commit()
+    flash(f'Банк "{bank.name}" успешно удален.', 'success')
+    return redirect(url_for('main.ui_banks'))
+
 @main_bp.route('/categories')
 def ui_categories():
-    categories_by_type = defaultdict(list)
-    all_categories = Category.query.order_by(Category.type, Category.name).all()
-    for cat in all_categories:
-        categories_by_type[cat.type].append(cat)
-    return render_template('categories.html', categories_by_type=categories_by_type)
+    expense_parents = Category.query.filter_by(type='expense', parent_id=None).order_by(Category.name).options(joinedload(Category.subcategories)).all()
+    income_parents = Category.query.filter_by(type='income', parent_id=None).order_by(Category.name).all()
+    return render_template('categories.html', expense_parents=expense_parents, income_parents=income_parents)
 
 @main_bp.route('/categories/add', methods=['GET', 'POST'])
 def ui_add_category_form():
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         cat_type = request.form.get('type', 'expense').strip()
+        parent_id = request.form.get('parent_id')
         if not name:
             flash('Название категории не может быть пустым.', 'danger')
         else:
@@ -1003,12 +1113,14 @@ def ui_add_category_form():
             if existing:
                 flash(f'Категория "{name}" с типом "{cat_type}" уже существует.', 'danger')
             else:
-                new_category = Category(name=name, type=cat_type)
+                new_category = Category(name=name, type=cat_type, parent_id=int(parent_id) if parent_id else None)
                 db.session.add(new_category)
                 db.session.commit()
                 flash(f'Категория "{name}" успешно добавлена.', 'success')
                 return redirect(url_for('main.ui_categories'))
-    return render_template('add_edit_category.html', title="Добавить категорию", category=None)
+    
+    parent_categories = Category.query.filter_by(parent_id=None).order_by(Category.type, Category.name).all()
+    return render_template('add_edit_category.html', title="Добавить категорию", category=None, parent_categories=parent_categories)
 
 @main_bp.route('/categories/<int:category_id>/edit', methods=['GET', 'POST'])
 def ui_edit_category_form(category_id):
@@ -1016,6 +1128,7 @@ def ui_edit_category_form(category_id):
     if request.method == 'POST':
         name = request.form.get('name', '').strip()
         cat_type = request.form.get('type', 'expense').strip()
+        parent_id = request.form.get('parent_id')
         if not name:
             flash('Название категории не может быть пустым.', 'danger')
         else:
@@ -1029,10 +1142,12 @@ def ui_edit_category_form(category_id):
             else:
                 category.name = name
                 category.type = cat_type
+                category.parent_id = int(parent_id) if parent_id else None
                 db.session.commit()
                 flash(f'Категория "{name}" успешно обновлена.', 'success')
                 return redirect(url_for('main.ui_categories'))
-    return render_template('add_edit_category.html', title="Редактировать категорию", category=category)
+    parent_categories = Category.query.filter(Category.parent_id.is_(None), Category.id != category_id).order_by(Category.type, Category.name).all()
+    return render_template('add_edit_category.html', title="Редактировать категорию", category=category, parent_categories=parent_categories)
 
 @main_bp.route('/categories/<int:category_id>/delete', methods=['POST'])
 def ui_delete_category(category_id):
