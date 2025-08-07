@@ -183,28 +183,29 @@ def ui_investment_platform_detail(platform_id):
     all_valued_assets = []
     platform_total_value_rub = Decimal(0)
     platform_total_value_usdt = Decimal(0)
-    account_type_summary = {}
+    account_type_summary = defaultdict(lambda: {'rub': Decimal(0), 'usdt': Decimal(0)})
     assets_with_balance = platform.assets.filter(InvestmentAsset.quantity > 0).order_by(InvestmentAsset.source_account_type, InvestmentAsset.ticker)
     for asset in assets_with_balance:
         quantity = asset.quantity or Decimal(0)
         price = asset.current_price or Decimal(0)
         rate = currency_rates_to_rub.get(asset.currency_of_price, Decimal(1.0))
 
-        asset_value_native = quantity * price
-        if asset.currency_of_price == 'USDT':
-            platform_total_value_usdt += asset_value_native
+        asset_value_usdt = quantity * price
+        platform_total_value_usdt += asset_value_usdt
 
-        asset_value_rub = asset_value_native * rate
-        account_type = asset.source_account_type or 'Unknown'
-        account_type_summary[account_type] = account_type_summary.get(account_type, Decimal(0)) + asset_value_rub
-            
+        asset_value_rub = asset_value_usdt * rate
         platform_total_value_rub += asset_value_rub
-        all_valued_assets.append({'asset': asset, 'value_rub': asset_value_rub})
+        
+        account_type = asset.source_account_type or 'Unknown'
+        account_type_summary[account_type]['rub'] += asset_value_rub
+        account_type_summary[account_type]['usdt'] += asset_value_usdt
+            
+        all_valued_assets.append({'asset': asset, 'value_rub': asset_value_rub, 'value_usdt': asset_value_usdt})
 
     manual_earn_balances = {}
     try:
         manual_earn_balances = json.loads(platform.manual_earn_balances_json)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         flash('Ошибка чтения ручных Earn балансов (неверный JSON). Пожалуйста, исправьте.', 'danger')
         manual_earn_balances = {}
 
@@ -233,12 +234,14 @@ def ui_investment_platform_detail(platform_id):
                 else:
                     current_price = Decimal('0.0')
 
-            asset_value_native = quantity * (current_price or Decimal(0))
-            platform_total_value_usdt += asset_value_native
+            asset_value_usdt = quantity * (current_price or Decimal(0))
+            platform_total_value_usdt += asset_value_usdt
 
-            asset_value_rub = asset_value_native * currency_rates_to_rub.get(currency_of_price, Decimal(1.0))
+            asset_value_rub = asset_value_usdt * currency_rates_to_rub.get(currency_of_price, Decimal(1.0))
             platform_total_value_rub += asset_value_rub
-            account_type_summary['Manual Earn'] = account_type_summary.get('Manual Earn', Decimal(0)) + asset_value_rub
+            
+            account_type_summary['Manual Earn']['rub'] += asset_value_rub
+            account_type_summary['Manual Earn']['usdt'] += asset_value_usdt
 
             DummyAsset = namedtuple('InvestmentAsset', ['ticker', 'name', 'quantity', 'current_price', 'currency_of_price', 'source_account_type', 'id'])
             all_valued_assets.append({
@@ -247,7 +250,7 @@ def ui_investment_platform_detail(platform_id):
                     current_price=current_price, currency_of_price=currency_of_price,
                     source_account_type='Manual Earn', id=None
                 ),
-                'value_rub': asset_value_rub
+                'value_rub': asset_value_rub, 'value_usdt': asset_value_usdt
             })
         except InvalidOperation:
             flash(f'Неверное количество для {ticker} в ручных Earn балансах. Проверьте формат.', 'danger')

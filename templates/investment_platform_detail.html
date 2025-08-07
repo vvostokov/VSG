@@ -39,8 +39,9 @@
                             <th>Тип кошелька</th>
                             <th class="text-right">Кол-во</th>
                             <th class="text-right">Цена</th>
+                            <th class="text-right">Стоимость (USDT)</th>
                             <th class="text-right">Стоимость (RUB)</th>
-                            <th>Действия</th>
+                            <th class="text-center">Действия</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -50,7 +51,8 @@
                             <td><span class="badge badge-info">{{ item.asset.source_account_type or 'N/A' }}</span></td>
                             <td class="text-right">{{ "%.6f"|format(item.asset.quantity or 0) }}</td>
                             <td class="text-right">{{ "%.4f"|format(item.asset.current_price or 0) }} {{ item.asset.currency_of_price or 'N/A' }}</td>
-                            <td class="text-right">{{ "%.2f"|format(item.value_rub) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(item.value_usdt) }} USDT</td>
+                            <td class="text-right">{{ "%.2f"|format(item.value_rub) }} ₽</td>
                             <td class="text-center">
                                 {# Определяем типы активов, которые можно редактировать вручную #}
                                 {% set manual_types = ['Manual', 'Manual Earn', 'Staking', 'Lending'] %}
@@ -83,10 +85,12 @@
             <h4>Балансы по типам кошельков</h4>
             {% if account_type_summary %}
             <ul class="list-group">
-                {% for account_type, total_value in account_type_summary %}
+                {% for account_type, totals in account_type_summary %}
                 <li class="list-group-item d-flex justify-content-between align-items-center">
                     {{ account_type }}
-                    <span class="badge badge-primary badge-pill">{{ "{:,.2f}".format(total_value) }} RUB</span>
+                    <span class="badge badge-primary badge-pill" style="font-size: 0.9em;">
+                        {{ "{:,.2f}".format(totals.rub) }} RUB / {{ totals.usdt|trim_zeros }} USDT
+                    </span>
                 </li>
                 {% endfor %}
             </ul>
