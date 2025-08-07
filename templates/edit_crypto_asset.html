@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Редактировать крипто-актив - {{ asset.ticker }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <h2 class="mb-4">Редактировать актив <span class="badge bg-secondary">{{ asset.ticker }}</span></h2>
+            <p>Платформа: <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id) }}">{{ asset.platform.name }}</a></p>
+            
+            <div class="card">
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('main.ui_edit_investment_asset', asset_id=asset.id) }}">
+                        
+                        <div class="mb-3">
+                            <label for="ticker" class="form-label">Тикер актива</label>
+                            <input type="text" class="form-control" id="ticker" name="ticker" value="{{ asset.ticker }}" readonly>
+                            <div class="form-text">Тикер актива изменить нельзя.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="quantity" class="form-label">Количество</label>
+                            <input type="text" class="form-control" id="quantity" name="quantity" value="{{ current_data.quantity | trim_zeros }}" required inputmode="decimal" placeholder="0.00">
+                            <div class="form-text">Используйте точку в качестве десятичного разделителя. Установка в 0 приведет к скрытию актива из списка.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="source_account_type" class="form-label">Тип кошелька</label>
+                            <input type="text" class="form-control" id="source_account_type" name="source_account_type" value="{{ current_data.source_account_type }}" required>
+                            <div class="form-text">Например: Manual, Staking, Lending.</div>
+                        </div>
+
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+                            <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id) }}" class="btn btn-secondary">Отмена</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

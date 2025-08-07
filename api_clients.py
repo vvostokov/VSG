@@ -271,7 +271,7 @@ def fetch_bingx_spot_tickers(target_symbols: list) -> list:
         for symbol in target_symbols:
             if symbol in all_tickers:
                 ticker_data = all_tickers[symbol]
-                change_24h_str = ticker.get('priceChangePercent', '0')
+                change_24h_str = ticker_data.get('priceChangePercent', '0')
                 # Remove '%' if present, then convert to float
                 if isinstance(change_24h_str, str) and change_24h_str.endswith('%'):
                     change_24h = float(change_24h_str.rstrip('%'))
@@ -662,8 +662,7 @@ def fetch_bybit_trade_history(api_key: str, api_secret: str, passphrase: str = N
                 'category': 'spot',
                 'limit': 50,
                 'startTime': start_ts_ms,
-                'endTime': end_ts_ms,
-                'orderStatus': 'Filled' # Только исполненные ордера
+                'endTime': end_ts_ms
             }
             if cursor:
                 params['cursor'] = cursor
@@ -863,8 +862,8 @@ def fetch_bybit_all_transactions(api_key: str, api_secret: str, passphrase: str 
     try:
         all_txs['internal_deposits'] = fetch_bybit_internal_deposit_history(api_key, api_secret, passphrase, start_time_dt, end_time_dt)
     except Exception as e:
-        print(f"--- [ERROR] Failed to fetch Bybit withdrawal history: {e}") # More prominent error
         print(f"Не удалось получить историю внутренних депозитов Bybit: {e}")
+        print(f"--- [ERROR] Failed to fetch Bybit internal deposit history: {e}")
     try:
         all_txs['withdrawals'] = fetch_bybit_withdrawal_history(api_key, api_secret, passphrase, start_time_dt, end_time_dt) # Correctly call and assign
     except Exception as e:

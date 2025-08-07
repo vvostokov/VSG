@@ -453,7 +453,11 @@ def ui_sync_investment_platform_transactions(platform_id):
                     if trade['symbol'].endswith('USDT'): base_coin, quote_coin = trade['symbol'][:-4], 'USDT'
                     elif trade['symbol'].endswith('USDC'): base_coin, quote_coin = trade['symbol'][:-4], 'USDC'
                     asset1_amount, asset2_amount = Decimal(trade.get('execQty', '0')), Decimal(trade.get('execValue', '0'))
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['execTime']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=asset2_amount / asset1_amount if asset1_amount else 0, fee_amount=Decimal(trade.get('execFee', '0')), fee_currency=base_coin if trade['side'].lower() == 'buy' else quote_coin, platform_id=platform.id, description=f"Spot {trade['side'].lower()} {asset1_amount} {base_coin}"))
+                    # ИСПРАВЛЕНО: Используем цену исполнения 'execPrice' напрямую из ответа API.
+                    # Это безопаснее, чем вычислять ее вручную (asset2_amount / asset1_amount),
+                    # так как избегает потенциальной ошибки деления на ноль, если execQty равен 0.
+                    execution_price = Decimal(trade.get('execPrice', '0'))
+                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['execTime']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=execution_price, fee_amount=Decimal(trade.get('execFee', '0')), fee_currency=base_coin if trade['side'].lower() == 'buy' else quote_coin, platform_id=platform.id, description=f"Spot {trade['side'].lower()} {asset1_amount} {base_coin}"))
                     added_count += 1
         elif platform_name == 'bitget':
             for d in fetched_data.get('deposits', []):
@@ -501,8 +505,12 @@ def ui_sync_investment_platform_transactions(platform_id):
         flash(f'Синхронизация транзакций для "{platform.name}" завершена. Найдено новых: {added_count}.', 'success')
 
     except Exception as e:
+        # УЛУЧШЕНО: Добавляем детальное логирование для отладки.
+        import traceback
+        current_app.logger.error(f"Полная ошибка при синхронизации транзакций для '{platform.name}':")
+        current_app.logger.error(traceback.format_exc())
         db.session.rollback()
-        flash(f'Ошибка при синхронизации транзакций для "{platform.name}": {e}', 'danger')
+        flash(f'Ошибка при синхронизации транзакций для "{platform.name}": {type(e).__name__} - {e}', 'danger')
 
     return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
@@ -517,20 +525,138 @@ def ui_delete_investment_platform(platform_id):
 
 @main_bp.route('/platforms/<int:platform_id>/assets/add', methods=['GET', 'POST'])
 def ui_add_investment_asset_form(platform_id):
-    flash('Форма добавления крипто-актива еще не реализована.', 'info')
-    return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform_id))
+    """Обрабатывает добавление крипто-актива вручную для платформы."""
+    platform = InvestmentPlatform.query.get_or_404(platform_id)
+    if platform.platform_type != 'crypto_exchange':
+        flash('Добавление активов вручную поддерживается только для крипто-платформ.', 'warning')
+        return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
+
+    if request.method == 'POST':
+        try:
+            ticker = request.form.get('ticker', '').upper().strip()
+            quantity_str = request.form.get('quantity', '0').replace(',', '.')
+            source_account_type = request.form.get('source_account_type', 'Manual').strip()
+
+            if not ticker:
+                raise ValueError('Тикер является обязательным полем.')
+            if not source_account_type:
+                raise ValueError('Тип кошелька является обязательным полем.')
+
+            quantity = Decimal(quantity_str)
+            if quantity <= 0:
+                raise ValueError('Количество должно быть положительным числом.')
+
+            # Проверяем, существует ли уже такой актив для данной платформы и типа кошелька
+            existing_asset = InvestmentAsset.query.filter_by(
+                platform_id=platform.id,
+                ticker=ticker,
+                source_account_type=source_account_type
+            ).first()
+
+            if existing_asset:
+                existing_asset.quantity += quantity
+                db.session.commit()
+                flash(f'К существующему активу {ticker} ({source_account_type}) добавлено {quantity}.', 'success')
+            else:
+                # Создаем новый актив и пытаемся получить его цену
+                current_price = Decimal('0')
+                currency_of_price = 'USDT'
+                if ticker.upper() in ['USDT', 'USDC', 'DAI']:
+                    current_price = Decimal('1.0')
+                else:
+                    price_fetcher_config = PRICE_TICKER_DISPATCHER.get(platform.name.lower())
+                    if price_fetcher_config:
+                        try:
+                            api_symbol = f"{ticker}{price_fetcher_config['suffix']}"
+                            ticker_data_list = price_fetcher_config['func'](target_symbols=[api_symbol])
+                            if ticker_data_list:
+                                current_price = Decimal(ticker_data_list[0]['price'])
+                                flash(f'Цена для {ticker} была автоматически получена: {current_price} USDT.', 'info')
+                        except Exception as e:
+                            current_app.logger.warning(f"Не удалось получить цену для {ticker} при ручном добавлении: {e}")
+                            flash(f'Не удалось автоматически получить цену для {ticker}.', 'warning')
+                
+                new_asset = InvestmentAsset(platform_id=platform.id, ticker=ticker, name=ticker, asset_type='crypto', quantity=quantity, current_price=current_price, currency_of_price=currency_of_price, source_account_type=source_account_type)
+                db.session.add(new_asset)
+                db.session.commit()
+                flash(f'Актив {ticker} ({quantity}) успешно добавлен в кошелек {source_account_type}.', 'success')
+
+            return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
+        except (ValueError, InvalidOperation) as e:
+            db.session.rollback()
+            flash(f'Ошибка в данных: {e}', 'danger')
+            return render_template('add_crypto_asset.html', platform=platform, current_data=request.form)
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Ошибка при добавлении крипто-актива: {e}", exc_info=True)
+            flash(f'Произошла непредвиденная ошибка: {e}', 'danger')
+            return render_template('add_crypto_asset.html', platform=platform, current_data=request.form)
+
+    # Для GET-запроса отображаем форму
+    return render_template('add_crypto_asset.html', platform=platform, current_data={})
 
 @main_bp.route('/crypto-assets/<int:asset_id>/edit', methods=['GET', 'POST'])
 def ui_edit_investment_asset(asset_id):
     asset = InvestmentAsset.query.get_or_404(asset_id)
-    flash(f'Форма редактирования крипто-актива {asset.ticker} еще не реализована.', 'info')
-    return redirect(url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id))
+    # Разрешаем редактировать только активы, добавленные вручную или не синхронизируемые
+    manual_types = ['Manual', 'Manual Earn', 'Staking', 'Lending']
+    if asset.source_account_type not in manual_types:
+        flash(f'Редактирование актива {asset.ticker} ({asset.source_account_type}) запрещено, так как он синхронизируется автоматически.', 'warning')
+        return redirect(url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id))
+
+    if request.method == 'POST':
+        try:
+            quantity_str = request.form.get('quantity', '0').replace(',', '.')
+            source_account_type = request.form.get('source_account_type', '').strip()
+
+            if not source_account_type:
+                raise ValueError('Тип кошелька является обязательным полем.')
+
+            quantity = Decimal(quantity_str)
+            if quantity < 0: # Разрешаем 0 для фактического обнуления
+                raise ValueError('Количество не может быть отрицательным.')
+
+            asset.quantity = quantity
+            asset.source_account_type = source_account_type
+            
+            db.session.commit()
+            flash(f'Актив {asset.ticker} успешно обновлен.', 'success')
+            return redirect(url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id))
+
+        except (ValueError, InvalidOperation) as e:
+            db.session.rollback()
+            flash(f'Ошибка в данных: {e}', 'danger')
+            return render_template('edit_crypto_asset.html', asset=asset, current_data=request.form)
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Ошибка при редактировании крипто-актива: {e}", exc_info=True)
+            flash(f'Произошла непредвиденная ошибка: {e}', 'danger')
+            return render_template('edit_crypto_asset.html', asset=asset, current_data=request.form)
+
+    # Для GET-запроса
+    return render_template('edit_crypto_asset.html', asset=asset, current_data=asset)
 
 @main_bp.route('/crypto-assets/<int:asset_id>/delete', methods=['POST'])
 def ui_delete_investment_asset(asset_id):
     asset = InvestmentAsset.query.get_or_404(asset_id)
-    flash(f'Удаление крипто-актива {asset.ticker} еще не реализовано.', 'info')
-    return redirect(url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id))
+    platform_id = asset.platform_id
+    
+    manual_types = ['Manual', 'Manual Earn', 'Staking', 'Lending']
+    if asset.source_account_type not in manual_types:
+        flash(f'Удаление актива {asset.ticker} ({asset.source_account_type}) запрещено, так как он синхронизируется автоматически.', 'warning')
+        return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform_id))
+    
+    try:
+        asset_ticker = asset.ticker
+        db.session.delete(asset)
+        db.session.commit()
+        flash(f'Актив "{asset_ticker}" успешно удален.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Ошибка при удалении крипто-актива: {e}", exc_info=True)
+        flash(f'Произошла ошибка при удалении актива: {e}', 'danger')
+        
+    return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform_id))
 
 @main_bp.route('/platforms/<int:platform_id>/transactions/add_exchange', methods=['GET', 'POST'])
 def ui_add_exchange_transaction_form(platform_id):

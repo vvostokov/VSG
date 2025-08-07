@@ -21,15 +21,21 @@ HEADERS = {
     'User-Agent': 'billchecker/2.9.0 (iPhone; iOS 13.6; Scale/2.00)',
 }
 
+# --- Глобальный кэш для клиента ФНС, чтобы не логиниться на каждый запрос ---
+_fns_client_cache = None
+_fns_client_cache_time = None
+CACHE_TTL_SECONDS = 1800 # 30 минут
+
+
 # --- Учетные данные из переменных окружения ---
-FNS_API_USERNAME = os.environ.get('FNS_API_USERNAME') # Телефон в формате +7...
+FNS_API_USERNAME = os.environ.get('FNS_API_USERNAME') # ИНН (Идентификационный номер налогоплательщика)
 FNS_API_PASSWORD = os.environ.get('FNS_API_PASSWORD') # Пароль от lkfl2.nalog.ru
 
 class FNSClient:
     """Клиент для взаимодействия с API ФНС России."""
     def __init__(self, username, password):
         if not username or not password:
-            raise ValueError("Необходимо передать имя пользователя (телефон) и пароль для API ФНС.")
+            raise ValueError("Необходимо передать ИНН и пароль для API ФНС.")
         self.username = username
         self.password = password
         self.session = requests.Session()
@@ -39,7 +45,7 @@ class FNSClient:
     def _login(self):
         """Выполняет вход в систему и получает ID сессии."""
         payload = {
-            'phone': self.username,
+            'inn': self.username,
             'password': self.password,
             'client_secret': 'IyvrAbKt9h/8p6a7QPh8gpkXYQ4=', # Статический ключ для мобильного приложения
             'os': 'iOS'
@@ -81,6 +87,25 @@ class FNSClient:
         
         raise Exception("Не удалось получить детали чека после нескольких попыток. Попробуйте позже.")
 
+def get_fns_client():
+    """
+    Фабричная функция для получения кэшированного экземпляра FNSClient.
+    Это позволяет избежать повторного входа в систему при каждом запросе.
+    """
+    global _fns_client_cache, _fns_client_cache_time
+
+    now = time.time()
+    # Сбрасываем кэш, если он устарел или пуст
+    if not _fns_client_cache or not _fns_client_cache_time or (now - _fns_client_cache_time > CACHE_TTL_SECONDS):
+        print("--- [FNS Client] Создание нового экземпляра клиента ФНС (кэш устарел или пуст).")
+        if not FNS_API_USERNAME or not FNS_API_PASSWORD:
+            raise ValueError("Учетные данные ФНС не настроены.")
+        
+        _fns_client_cache = FNSClient(FNS_API_USERNAME, FNS_API_PASSWORD)
+        _fns_client_cache_time = now
+    
+    return _fns_client_cache
+
 def parse_receipt_qr(qr_string: str) -> dict:
     """Парсит строку QR-кода с чека ФНС и возвращает структурированные данные."""
     if not FNS_API_USERNAME or not FNS_API_PASSWORD:
@@ -88,7 +113,8 @@ def parse_receipt_qr(qr_string: str) -> dict:
     if not qr_string or not qr_string.strip():
         raise ValueError("Строка QR-кода не может быть пустой.")
     try:
-        client = FNSClient(FNS_API_USERNAME, FNS_API_PASSWORD)
+        # Используем фабричную функцию для получения клиента
+        client = get_fns_client()
         receipt_json = client.get_receipt(qr_string)
         document_data = receipt_json.get('ticket', {}).get('document', {}).get('receipt', {})
         if not document_data:
@@ -109,5 +135,9 @@ def parse_receipt_qr(qr_string: str) -> dict:
             })
         return parsed_data
     except Exception as e:
+        # Если произошла ошибка (особенно ошибка входа), сбрасываем кэш,
+        # чтобы при следующей попытке был создан новый клиент.
+        global _fns_client_cache
+        _fns_client_cache = None
         print(f"Ошибка при обработке QR-кода: {e}")
         return {'error': str(e)}

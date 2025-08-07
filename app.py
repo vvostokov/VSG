@@ -1,10 +1,19 @@
 import os
 from flask import Flask
 from decimal import Decimal
+from dotenv import load_dotenv
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
+
 from extensions import db, migrate
 
 def create_app():
     """Application Factory."""
+    # Загружаем переменные окружения из файла .env в самом начале
+    load_dotenv()
+    
     app = Flask(__name__)
     basedir = os.path.abspath(os.path.dirname(__file__))
 
@@ -18,8 +27,21 @@ def create_app():
     app.config['UPLOAD_FOLDER'] = os.path.join(basedir, 'uploads')
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     app.config['ITEMS_PER_PAGE'] = 20
+    # --- Инициализация Fernet для шифрования ---
+    # Инициализируем Fernet для шифрования/дешифрования API-ключей.
+    # Это нужно делать здесь, после load_dotenv(), чтобы гарантировать,
+    # что используется правильный SECRET_KEY из .env файла.
+    SALT = b'salt_for_zamliky_app' # Соль должна быть той же, что и при шифровании
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=SALT,
+        iterations=100000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(app.config['SECRET_KEY'].encode()))
+    app.config['FERNET'] = Fernet(key)
     # --- FNS API Credentials for QR Code parsing ---
-    app.config['FNS_API_USERNAME'] = os.environ.get('FNS_API_USERNAME')
+    app.config['FNS_API_USERNAME'] = os.environ.get('FNS_API_USERNAME') # Ваш ИНН
     app.config['FNS_API_PASSWORD'] = os.environ.get('FNS_API_PASSWORD')
 
     # --- Initialize Extensions ---
