@@ -398,11 +398,15 @@ def ui_sync_investment_platform(platform_id):
         flash(f'Синхронизация для "{platform.name}" прошла успешно. Добавлено: {added_count}, Обновлено: {updated_count}, Обнулено: {removed_count}.', 'success')
 
     except Exception as e:
+        import traceback
+        current_app.logger.error(f"Полная ошибка при синхронизации балансов для '{platform.name}':")
+        current_app.logger.error(traceback.format_exc())
         db.session.rollback()
         platform.last_sync_status = f"Error: {e}"
         platform.last_synced_at = datetime.now(timezone.utc)
         db.session.commit()
-        flash(f'Ошибка при синхронизации "{platform.name}": {e}', 'danger')
+        # УЛУЧШЕНО: Показываем более информативное сообщение об ошибке в интерфейсе
+        flash(f'Ошибка при синхронизации "{platform.name}": {type(e).__name__} - {e}', 'danger')
     return redirect(request.referrer or url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
 @main_bp.route('/platforms/<int:platform_id>/sync_transactions', methods=['POST'])
