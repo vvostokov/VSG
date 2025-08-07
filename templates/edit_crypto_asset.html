@@ -6,7 +6,7 @@
 <div class="container mt-4">
     <div class="row">
         <div class="col-md-8 offset-md-2">
-            <h2 class="mb-4">Редактировать актив <span class="badge bg-secondary">{{ asset.ticker }}</span></h2>
+            <h2 class="mb-4">Редактировать актив <span class="badge badge-secondary">{{ asset.ticker }}</span></h2>
             <p>Платформа: <a href="{{ url_for('main.ui_investment_platform_detail', platform_id=asset.platform_id) }}">{{ asset.platform.name }}</a></p>
             
             <div class="card">

@@ -51,12 +51,19 @@
                             <td class="text-right">{{ "%.6f"|format(item.asset.quantity or 0) }}</td>
                             <td class="text-right">{{ "%.4f"|format(item.asset.current_price or 0) }} {{ item.asset.currency_of_price or 'N/A' }}</td>
                             <td class="text-right">{{ "%.2f"|format(item.value_rub) }}</td>
-                            <td>
-                                 {% if item.asset.id %}
-                                <a href="{{ url_for('main.ui_edit_investment_asset', asset_id=item.asset.id) }}" class="btn btn-xs btn-outline-primary">Ред.</a>
-                                <form action="{{ url_for('main.ui_delete_investment_asset', asset_id=item.asset.id) }}" method="POST" style="display: inline-block;" onsubmit="return confirm('Удалить актив {{ item.asset.ticker }}?');">
-                                    <button type="submit" class="btn btn-xs btn-outline-danger">Удал.</button>
-                                </form>
+                            <td class="text-center">
+                                {# Определяем типы активов, которые можно редактировать вручную #}
+                                {% set manual_types = ['Manual', 'Manual Earn', 'Staking', 'Lending'] %}
+                                {# Показываем кнопки только для существующих в БД активов с ручным типом #}
+                                {% if item.asset.id and item.asset.source_account_type in manual_types %}
+                                    <a href="{{ url_for('main.ui_edit_investment_asset', asset_id=item.asset.id) }}" class="btn btn-sm btn-outline-primary" title="Редактировать">
+                                        <i class="fas fa-pencil-alt"></i>
+                                    </a>
+                                    <form action="{{ url_for('main.ui_delete_investment_asset', asset_id=item.asset.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Вы уверены, что хотите удалить актив {{ item.asset.ticker }}?');">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Удалить">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </form>
                                 {% endif %}
                             </td>
                         </tr>
