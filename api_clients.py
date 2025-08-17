@@ -875,21 +875,22 @@ def fetch_bitget_all_transactions(api_key: str, api_secret: str, passphrase: str
     # --- Deposits ---
     try:
         current_app.logger.info("\n--- [Bitget] Получение истории депозитов ---")
-        all_txs['deposits'] = _fetch_paginated_data_with_time('/api/v2/asset/deposit-record', 'id', 'idLessThan')
+        all_txs['deposits'] = _fetch_paginated_data_with_time('/api/v2/asset/funding/deposit-record', 'id', 'idLessThan')
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю депозитов Bitget: {e}")
         
     # --- Withdrawals ---
     try:
         current_app.logger.info("\n--- [Bitget] Получение истории выводов ---")
-        all_txs['withdrawals'] = _fetch_paginated_data_with_time('/api/v2/asset/withdrawal-record', 'withdrawId', 'idLessThan')
+        all_txs['withdrawals'] = _fetch_paginated_data_with_time('/api/v2/asset/funding/withdrawal-record', 'withdrawId', 'idLessThan')
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю выводов Bitget: {e}")
         
     # --- Transfers ---
     try:
         current_app.logger.info("\n--- [Bitget] Получение истории переводов ---")
-        all_txs['transfers'] = _fetch_paginated_data_with_time('/api/v2/asset/transfer-record', 'id', 'idLessThan')
+        # ИСПРАВЛЕНО: Путь для переводов также изменен для соответствия новой структуре API.
+        all_txs['transfers'] = _fetch_paginated_data_with_time('/api/v2/asset/funding/transfer-record', 'id', 'idLessThan')
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю переводов Bitget: {e}")
         
@@ -1231,9 +1232,9 @@ def fetch_kucoin_all_transactions(api_key: str, api_secret: str, passphrase: str
         current_app.logger.error(f"Не удалось получить историю сделок KuCoin: {e}")
     try:
         current_app.logger.info("\n--- [KuCoin] Получение истории переводов (ledgers) ---")
-        # Используем эндпоинт v2, так как v1 для переводов устарел.
+        # ИСПРАВЛЕНО: Используем эндпоинт v1, так как v2 был объявлен устаревшим (deprecated).
         # Фильтруем по bizType, чтобы получить только переводы.
-        all_txs['transfers'] = _fetch_kucoin_paginated_data_in_chunks('/api/v2/accounts/ledgers', base_params={'bizType': 'TRANSFER'})
+        all_txs['transfers'] = _fetch_kucoin_paginated_data_in_chunks('/api/v1/accounts/ledgers', base_params={'bizType': 'TRANSFER'})
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю переводов KuCoin: {e}")
     
