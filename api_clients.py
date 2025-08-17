@@ -1120,12 +1120,15 @@ def fetch_kucoin_account_assets(api_key: str, api_secret: str, passphrase: str =
     
     # KuCoin API возвращает все счета одним запросом
     current_app.logger.info("\n--- [KuCoin] Попытка получить балансы со всех счетов ---")
+    # ИСПРАВЛЕНО: Используем эндпоинт v1, так как v2 возвращает ошибку 404.
     all_accounts_data = _kucoin_api_get(api_key, api_secret, passphrase, '/api/v1/accounts')
     if all_accounts_data and all_accounts_data.get('data'):
         for account in all_accounts_data['data']:
             quantity = float(account.get('balance', 0))
             if quantity > 1e-9:
-                account_type_raw = account.get('type', 'unknown')
+                # ИСПРАВЛЕНО: Приводим тип счета к нижнему регистру для совместимости
+                # с ответами v1 ('main') и v2 ('MAIN').
+                account_type_raw = account.get('type', 'unknown').lower()
                 # Маппинг типов счетов KuCoin в наши типы
                 account_type_map = {
                     'main': 'Funding',
@@ -1195,14 +1198,18 @@ def fetch_kucoin_all_transactions(api_key: str, api_secret: str, passphrase: str
         loop_end_time = end_time_dt or datetime.now(timezone.utc)
         loop_start_time = start_time_dt or (loop_end_time - timedelta(days=2*365))
         current_chunk_end_time = loop_end_time
+        # ИСПРАВЛЕНО: Увеличиваем размер чанка до 7 дней, так как API KuCoin это позволяет.
+        # Это значительно сократит количество запросов.
+        chunk_delta = timedelta(days=7)
         while current_chunk_end_time > loop_start_time:
-            current_chunk_start_time = max(loop_start_time, current_chunk_end_time - timedelta(hours=24))
+            current_chunk_start_time = max(loop_start_time, current_chunk_end_time - chunk_delta)
             time_chunks.append((current_chunk_start_time, current_chunk_end_time))
             current_chunk_end_time = current_chunk_start_time - timedelta(microseconds=1)
 
         # 2. Запускаем запросы для всех отрезков параллельно
         all_records = []
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # ИСПРАВЛЕНО: Уменьшаем количество параллельных воркеров до 2, чтобы избежать ошибок 429 (Rate Limit).
+        with ThreadPoolExecutor(max_workers=2) as executor:
             # Подготавливаем аргументы для каждой задачи
             tasks_args = [(endpoint, base_params, start, end) for start, end in time_chunks]
             future_to_chunk = {executor.submit(_fetch_single_kucoin_chunk, args): args for args in tasks_args}
