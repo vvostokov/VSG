@@ -240,3 +240,22 @@ class Bank(db.Model):
 
     def __repr__(self):
         return f'<Bank {self.name}>'
+    
+class TranslationCache(db.Model):
+    """Кэш для хранения переводов текста."""
+    __tablename__ = 'translation_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    # Хэш используется как быстрый и уникальный ключ для оригинального текста
+    source_hash = db.Column(db.String(32), nullable=False, index=True)
+    source_lang = db.Column(db.String(10), nullable=False)
+    target_lang = db.Column(db.String(10), nullable=False)
+    translated_text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Гарантируем, что для одной и той же фразы и пары языков будет только одна запись
+    __table_args__ = (
+        db.UniqueConstraint('source_hash', 'source_lang', 'target_lang', name='_source_hash_lang_uc'),
+    )
+
+    def __repr__(self):
+        return f'<TranslationCache {self.source_hash} [{self.source_lang}->{self.target_lang}]>'

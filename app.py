@@ -1,6 +1,7 @@
 import os
 from flask import Flask
 from decimal import Decimal
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -43,6 +44,8 @@ def create_app():
     # --- FNS API Credentials for QR Code parsing ---
     app.config['FNS_API_USERNAME'] = os.environ.get('FNS_API_USERNAME') # Ваш ИНН
     app.config['FNS_API_PASSWORD'] = os.environ.get('FNS_API_PASSWORD')
+    # --- CryptoCompare News API Key ---
+    app.config['CRYPTOCOMPARE_API_KEY'] = os.environ.get('CRYPTOCOMPARE_API_KEY')
 
     # --- Initialize Extensions ---
     db.init_app(app)
@@ -56,6 +59,19 @@ def create_app():
         if isinstance(value, str) and '.' in value:
             return value.rstrip('0').rstrip('.')
         return value
+
+    @app.template_filter()
+    def timestamp_to_datetime(ts):
+        """Converts a UNIX timestamp to a timezone-aware datetime object."""
+        try:
+            return datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+    @app.template_filter()
+    def datetime_format(dt, fmt='%d.%m.%Y %H:%M'):
+        """Formats a datetime object into a string."""
+        return dt.strftime(fmt) if dt else ''
 
     # --- Register Blueprints ---
     with app.app_context():

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Новости криптовалют{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
+    <h1 class="mb-2 mb-md-0">Новости криптовалют</h1>
+    <form method="GET" action="{{ url_for('main.ui_crypto_news') }}" class="form-inline">
+        <div class="form-group">
+            <label for="categoryFilter" class="mr-2">Фильтр:</label>
+            <select class="form-control form-control-sm" id="categoryFilter" name="category" onchange="this.form.submit()">
+                {% for cat in available_categories %}
+                    <option value="{{ cat }}" {% if cat == selected_category %}selected{% endif %}>
+                        {{ cat if cat != 'ALL' else 'Все новости' }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+</div>
+
+<div class="row">
+    {% if news_articles %}
+        {% for article in news_articles %}
+        <div class="col-12 mb-3">
+            <div class="card">
+                <div class="row no-gutters">
+                    <div class="col-md-2 d-none d-md-block">
+                        <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">
+                            <img src="{{ article.imageurl }}" class="card-img" alt="News Image" style="height: 100%; object-fit: cover; border-top-right-radius: 0; border-bottom-right-radius: 0;">
+                        </a>
+                    </div>
+                    <div class="col-md-10">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer">{{ article.title_ru }}</a>
+                                {% if article.sentiment and article.sentiment.compound is defined %}
+                                    {% set compound = article.sentiment.compound %}
+                                    {% if compound >= 0.05 %}
+                                        <span class="badge badge-success ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Позитивная</span>
+                                    {% elif compound <= -0.05 %}
+                                        <span class="badge badge-danger ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Негативная</span>
+                                    {% else %}
+                                        <span class="badge badge-secondary ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Нейтральная</span>
+                                    {% endif %}
+                                {% endif %}
+                            </h5>
+                            <p class="card-text small">{{ article.body_ru | truncate(300) }}</p>
+                            <p class="card-text small text-muted mt-2 font-italic">
+                                Оригинал: {{ article.title | truncate(120) }}
+                            </p>
+                            <p class="card-text">
+                                <small class="text-muted">
+                                    <strong>{{ article.source_info.name }}</strong> &bull; {{ article.published_on | timestamp_to_datetime | datetime_format }}
+                                </small>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center">
+                    <p class="mb-0">Новости по выбранным критериям не найдены.</p>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

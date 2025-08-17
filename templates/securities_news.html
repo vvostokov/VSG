@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Новости фондового рынка{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Новости российского рынка</h1>
+    <small class="text-muted">Источник: Investing.com (Россия)</small>
+</div>
+
+<div class="list-group">
+    {% if news_articles %}
+        {% for article in news_articles %}
+        <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" class="list-group-item list-group-item-action flex-column align-items-start">
+            <div class="d-flex w-100 justify-content-between">
+                <h5 class="mb-1">{{ article.title }}</h5>
+                {% if article.published_on_str %}
+                <small class="text-muted">{{ article.published_on_str }}</small>
+                {% endif %}
+            </div>
+            <p class="mb-1">{{ article.body | striptags | truncate(300) }}</p>
+            <small class="text-primary">{{ article.source_info.name }}</small>
+        </a>
+        {% endfor %}
+    {% else %}
+        <div class="list-group-item text-center"><p class="mb-0">Не удалось загрузить новости.</p></div>
+    {% endif %}
+</div>
+{% endblock %}

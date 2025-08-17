@@ -1,123 +1,100 @@
 {% extends "base.html" %}
+{% from "_macros.html" import render_pagination, format_decimal, format_percent %}
 
-{% block title %}Обзор активов ЦБ{% endblock %}
-
-{% macro render_change_cell(change_value) %}
-    {% if change_value is not none %}
-        {% set color = 'text-success' if change_value > 0 else 'text-danger' %}
-        <span class="{{ color }}">{{ "%.2f"|format(change_value) }}%</span>
-    {% else %}
-        <span class="text-muted">-</span>
-    {% endif %}
-{% endmacro %}
+{% block title %}Обзор портфеля ЦБ{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="mb-0">Обзор ценных бумаг</h1>
-        <div class="text-end">
-            <form action="{{ url_for('securities.ui_refresh_securities_historical_data') }}" method="POST" class="d-inline mb-2">
-                <button type="submit" class="btn btn-sm btn-outline-info" title="Обновить данные об изменении цен"><i class="fas fa-sync-alt"></i> Обновить изменения</button>
-            </form>
-            <h4>Общая стоимость</h4>
-            <h2 class="text-primary mb-1">{{ "%.2f"|format(grand_total_rub or 0) }} RUB</h2>
+        <h1>Активы: Ценные бумаги</h1>
+        <form action="{{ url_for('securities.ui_refresh_securities_historical_data') }}" method="POST" class="d-inline">
+            <button type="submit" class="btn btn-sm btn-info"><i class="fas fa-sync-alt"></i> Обновить % изм.</button>
+        </form>
+    </div>
+
+    <!-- Totals Row -->
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title text-primary">Общая стоимость (RUB)</h5>
+                    <p class="card-text h3">{{ format_decimal(grand_total_rub, 2) }} ₽</p>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div class="row mb-4">
-        <div class="col-lg-12">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h5 class="card-title">Инвестиции по брокерам</h5>
-                    {% if platform_summary %}
-                    <div class="list-group list-group-flush">
-                        {% for platform_name, data in platform_summary %}
-                        <div class="list-group-item d-flex justify-content-between align-items-center px-0">
-                            <span><a href="{{ url_for('securities.ui_broker_detail', platform_id=data.id) }}">{{ platform_name }}</a></span>
-                            <div class="text-end">
-                                <strong class="d-block">{{ "%.2f"|format(data.total_rub) }} RUB</strong>
-                            </div>
-                        </div>
+    <!-- News Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Последние новости рынка</h5>
+                    <a href="{{ url_for('main.ui_securities_news') }}">Все новости &rarr;</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% if latest_news %}
+                        {% for article in latest_news %}
+                            <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" class="list-group-item list-group-item-action">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ article.title }}</h6>
+                                    {% if article.published_on_str %}
+                                    <small class="text-muted">{{ article.published_on_str }}</small>
+                                    {% endif %}
+                                </div>
+                                <p class="mb-1 small text-muted">{{ article.body | striptags | truncate(150) }}</p>
+                                <small class="text-primary">{{ article.source_info.name }}</small>
+                            </a>
                         {% endfor %}
-                    </div>
                     {% else %}
-                    <p class="text-muted">Нет данных для отображения.</p>
+                        <div class="list-group-item text-center"><p class="mb-0">Новости не найдены.</p></div>
                     {% endif %}
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h5 class="card-title">Все активы</h5>
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Актив (ISIN)</th>
-                                    <th>Название</th>
-                                    <th class="text-end">Количество</th>
-                                    <th class="text-end">Цена</th>
-                                    <th class="text-end">Стоимость (RUB)</th>
-                                    <th class="text-center" style="width: 25%;">Изменение цены</th>
-                                    <th></th> <!-- For expand button -->
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for isin, data in assets %}
-                                <tr data-toggle="collapse" href="#collapse-{{ isin }}" role="button" aria-expanded="false" aria-controls="collapse-{{ isin }}" style="cursor: pointer;">
-                                    <td>
-                                        <strong>{{ isin }}</strong>
-                                    </td>
-                                    <td>{{ data.name }}</td>
-                                    <td class="text-end">{{ data.total_quantity|trim_zeros }}</td>
-                                    <td class="text-end">{{ "%.4f"|format(data.current_price) }} {{ data.currency_of_price }}</td>
-                                    <td class="text-end">
-                                        <strong>{{ "%.2f"|format(data.total_value_rub) }} RUB</strong>
-                                    </td>
-                                    <td>
-                                        <div class="d-flex justify-content-around small">
-                                            <span>1д: {{ render_change_cell(data['1d']) }}</span>
-                                            <span>7д: {{ render_change_cell(data['7d']) }}</span>
-                                            <span>30д: {{ render_change_cell(data['30d']) }}</span>
-                                            <span>1г: {{ render_change_cell(data['365d']) }}</span>
-                                        </div>
-                                    </td>
-                                    <td><i class="fas fa-chevron-down"></i></td>
-                                </tr>
-                                <tr>
-                                    <td colspan="7" class="p-0" style="border: none;">
-                                        <div class="collapse" id="collapse-{{ isin }}">
-                                            <div class="p-3 bg-light">
-                                                <h6>Размещение актива:</h6>
-                                                <ul class="list-group list-group-flush">
-                                                    {% for location in data.locations %}
-                                                    <li class="list-group-item d-flex justify-content-between align-items-center bg-light">
-                                                        <span>
-                                                            <a href="{{ url_for('securities.ui_broker_detail', platform_id=location.platform_id) }}">{{ location.platform_name }}</a>
-                                                        </span>
-                                                        <span>{{ location.quantity|trim_zeros }} шт.</span>
-                                                    </li>
-                                                    {% endfor %}
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr>
-                                    <td colspan="7" class="text-center">Активы не найдены.</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+    <!-- Assets Table -->
+    <div class="card mb-4">
+        <div class="card-header">Активы по ISIN</div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Актив (ISIN)</th>
+                            <th>Кол-во</th>
+                            <th>Цена (RUB)</th>
+                            <th>Стоимость (RUB)</th>
+                            <th>1д %</th>
+                            <th>7д %</th>
+                            <th>30д %</th>
+                            <th>Локации</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if assets %}
+                            {% for isin, data in assets %}
+                            <tr>
+                                <td><strong>{{ data.name }}</strong><br><small class="text-muted">{{ isin }}</small></td>
+                                <td>{{ format_decimal(data.total_quantity, 6) }}</td>
+                                <td>{{ format_decimal(data.current_price, 4) }}</td>
+                                <td>{{ format_decimal(data.total_value_rub, 2) }}</td>
+                                <td>{{ format_percent(data['1d']) }}</td>
+                                <td>{{ format_percent(data['7d']) }}</td>
+                                <td>{{ format_percent(data['30d']) }}</td>
+                                <td>
+                                    {% for loc in data.locations %}
+                                        <small><a href="{{ url_for('securities.ui_broker_detail', platform_id=loc.platform_id) }}">{{ loc.platform_name }}</a>: {{ format_decimal(loc.quantity, 6) }}</small><br>
+                                    {% endfor %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr><td colspan="8" class="text-center">Активы не найдены.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
-</div>
 {% endblock %}
