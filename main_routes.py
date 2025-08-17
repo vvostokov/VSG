@@ -323,10 +323,36 @@ def ui_edit_investment_platform_form(platform_id):
         return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
     return render_template('edit_investment_platform.html', platform=platform)
 
+def _get_sync_function(platform_name: str, dispatcher: dict):
+    """
+    Вспомогательная функция для поиска функции синхронизации в диспетчере.
+    Поддерживает "нечеткий" поиск для распространенных имен бирж, чтобы избежать
+    проблем из-за опечаток или разных стилей написания (например, 'Kukoin' vs 'KuCoin').
+    """
+    # Приводим имя к нижнему регистру и убираем пробелы/дефисы для надежности
+    name_lower = platform_name.lower().replace('-', '').replace(' ', '')
+    
+    # 1. Прямое совпадение по очищенному имени
+    sync_function = dispatcher.get(name_lower)
+    if sync_function:
+        return sync_function
+        
+    # 2. Нечеткий поиск по ключевым словам
+    # Это позволяет найти 'kucoin' в 'my kucoin account' или 'kukoin'
+    alias_map = {
+        'kucoin': ['kukoin'],
+        'bybit': [], 'bingx': [], 'bitget': [], 'okx': []
+    }
+    for canonical, aliases in alias_map.items():
+        if canonical in name_lower or any(alias in name_lower for alias in aliases):
+            return dispatcher.get(canonical)
+            
+    return None
+
 @main_bp.route('/platforms/<int:platform_id>/sync', methods=['POST'])
 def ui_sync_investment_platform(platform_id):
     platform = InvestmentPlatform.query.get_or_404(platform_id)
-    sync_function = SYNC_DISPATCHER.get(platform.name.lower())
+    sync_function = _get_sync_function(platform.name, SYNC_DISPATCHER)
 
     if not sync_function:
         flash(f'Синхронизация для платформы "{platform.name}" еще не реализована.', 'warning')
@@ -416,9 +442,10 @@ def ui_sync_investment_platform(platform_id):
 @main_bp.route('/platforms/<int:platform_id>/sync_transactions', methods=['POST'])
 def ui_sync_investment_platform_transactions(platform_id):
     platform = InvestmentPlatform.query.get_or_404(platform_id)
-    sync_function = SYNC_TRANSACTIONS_DISPATCHER.get(platform.name.lower())
+    sync_function = _get_sync_function(platform.name, SYNC_TRANSACTIONS_DISPATCHER)
 
     if not sync_function:
+        current_app.logger.warning(f"Функция синхронизации транзакций не найдена для платформы '{platform.name}'. Проверьте название.")
         flash(f'Синхронизация транзакций для платформы "{platform.name}" еще не реализована.', 'warning')
         return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
@@ -534,19 +561,26 @@ def ui_sync_investment_platform_transactions(platform_id):
                     if execution_price == 0 and asset1_amount > 0 and asset2_amount > 0:
                         execution_price = asset2_amount / asset1_amount
                     
-                    # Обработка комиссии из JSON-строки.
+                    # УЛУЧШЕНО: Более надежная обработка комиссии, которая может приходить
+                    # как JSON-строка или уже как готовый список, что предотвращает ошибки.
                     fee_amount = Decimal('0')
                     fee_currency = quote_coin # Резервный вариант
-                    fee_detail_str = trade.get('feeDetail')
-                    if fee_detail_str and isinstance(fee_detail_str, str):
-                         try:
-                             fee_details_list = json.loads(fee_detail_str)
-                             if fee_details_list:
-                                 fee_details = fee_details_list[0]
-                                 fee_amount = Decimal(fee_details.get('fee', '0'))
-                                 fee_currency = fee_details.get('feeCoin')
-                         except (json.JSONDecodeError, IndexError, TypeError) as e:
-                             current_app.logger.warning(f"Не удалось разобрать feeDetail для Bitget: {fee_detail_str}. Ошибка: {e}")
+                    fee_detail_value = trade.get('feeDetail')
+                    fee_details_list = None
+
+                    if isinstance(fee_detail_value, str) and fee_detail_value:
+                        try:
+                            fee_details_list = json.loads(fee_detail_value)
+                        except json.JSONDecodeError:
+                            current_app.logger.warning(f"Не удалось разобрать JSON из feeDetail для Bitget: {fee_detail_value}")
+                    elif isinstance(fee_detail_value, list):
+                        fee_details_list = fee_detail_value
+
+                    if fee_details_list and isinstance(fee_details_list, list) and len(fee_details_list) > 0:
+                        fee_details = fee_details_list[0]
+                        if isinstance(fee_details, dict):
+                            fee_amount = Decimal(fee_details.get('fee', '0'))
+                            fee_currency = fee_details.get('feeCoin', fee_currency)
 
                     db.session.add(Transaction(
                         exchange_tx_id=prefixed_id, 

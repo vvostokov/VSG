@@ -7,6 +7,7 @@ import requests
 from datetime import datetime, timedelta, timezone, date # noqa
 from urllib.parse import urlencode
 from decimal import Decimal
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- Константы базовых URL API ---
 BYBIT_BASE_URL = "https://api.bybit.com"
@@ -1148,69 +1149,89 @@ def fetch_kucoin_all_transactions(api_key: str, api_secret: str, passphrase: str
     ИСПРАВЛЕНО: Добавлена логика для обхода 24-часового ограничения API KuCoin
     путем итерации по временному диапазону с шагом в 24 часа.
     """
-    current_app.logger.info(f"Получение истории транзакций с KuCoin с ключом: {api_key[:5]}...")
+    current_app.logger.info(f"Получение истории транзакций с KuCoin (параллельный режим) с ключом: {api_key[:5]}...")
     if not api_key or not api_secret or not passphrase:
         raise Exception("Для KuCoin необходимы API ключ, секрет и парольная фраза.")
 
+    def _fetch_single_kucoin_chunk(args):
+        """
+        (Внутренняя функция для ThreadPoolExecutor) Получает все страницы данных для одного временного отрезка.
+        """
+        endpoint, base_params, chunk_start_time, chunk_end_time = args
+        chunk_records = []
+        current_page = 1
+        while True:
+            params = base_params.copy() if base_params else {}
+            params['currentPage'] = current_page
+            params['pageSize'] = 500
+            params['startAt'] = int(chunk_start_time.timestamp() * 1000)
+            params['endAt'] = int(chunk_end_time.timestamp() * 1000)
+
+            response_data = _kucoin_api_get(api_key, api_secret, passphrase, endpoint, params)
+            if not response_data or not response_data.get('data', {}).get('items'):
+                break
+            
+            records = response_data['data']['items']
+            chunk_records.extend(records)
+            
+            if len(records) < params['pageSize']:
+                break
+            
+            current_page += 1
+            time.sleep(0.3) # Задержка для соблюдения rate limit
+        return chunk_records
+
     def _fetch_kucoin_paginated_data_in_chunks(endpoint, base_params=None):
         """
-        Fetches paginated data from KuCoin by iterating through the time range in 24-hour chunks.
-        This is necessary because the API limits time-based queries to a 24-hour window.
+        ОПТИМИЗИРОВАНО: Получает данные с KuCoin, запрашивая 24-часовые отрезки параллельно.
         """
-        all_records = []
-        
-        # Определяем общий временной диапазон для загрузки
-        loop_end_time = end_time_dt if end_time_dt else datetime.now(timezone.utc)
-        # По умолчанию запрашиваем историю за 2 года, если начальная дата не указана
-        loop_start_time = start_time_dt if start_time_dt else (loop_end_time - timedelta(days=2*365))
-
+        # 1. Генерируем список всех 24-часовых отрезков для запроса
+        time_chunks = []
+        loop_end_time = end_time_dt or datetime.now(timezone.utc)
+        loop_start_time = start_time_dt or (loop_end_time - timedelta(days=2*365))
         current_chunk_end_time = loop_end_time
-
         while current_chunk_end_time > loop_start_time:
-            # Определяем 24-часовой отрезок, не выходя за общие рамки
             current_chunk_start_time = max(loop_start_time, current_chunk_end_time - timedelta(hours=24))
-            
-            current_app.logger.info(f"--- [KuCoin History: {endpoint}] Запрос за чанк: {current_chunk_start_time.strftime('%Y-%m-%d %H:%M')} -> {current_chunk_end_time.strftime('%Y-%m-%d %H:%M')}")
-
-            current_page = 1
-            while True: # Цикл пагинации для текущего отрезка
-                params = base_params.copy() if base_params else {}
-                params['currentPage'] = current_page
-                params['pageSize'] = 500
-                params['startAt'] = int(current_chunk_start_time.timestamp() * 1000)
-                params['endAt'] = int(current_chunk_end_time.timestamp() * 1000)
-
-                response_data = _kucoin_api_get(api_key, api_secret, passphrase, endpoint, params)
-                if not response_data or not response_data.get('data', {}).get('items'):
-                    break # Больше нет данных на этой странице или в этом отрезке
-                
-                records = response_data['data']['items']
-                all_records.extend(records)
-                
-                # Проверяем, была ли это последняя страница для данного отрезка
-                if len(records) < params['pageSize']:
-                    break
-                
-                current_page += 1
-                time.sleep(0.3)
-            
-            # Переходим к предыдущему 24-часовому отрезку
+            time_chunks.append((current_chunk_start_time, current_chunk_end_time))
             current_chunk_end_time = current_chunk_start_time - timedelta(microseconds=1)
-            time.sleep(0.3)
 
-        # Удаление дубликатов, если API вернет их на границах отрезков
+        # 2. Запускаем запросы для всех отрезков параллельно
+        all_records = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # Подготавливаем аргументы для каждой задачи
+            tasks_args = [(endpoint, base_params, start, end) for start, end in time_chunks]
+            future_to_chunk = {executor.submit(_fetch_single_kucoin_chunk, args): args for args in tasks_args}
+            
+            for i, future in enumerate(as_completed(future_to_chunk)):
+                chunk_args = future_to_chunk[future]
+                try:
+                    chunk_result = future.result()
+                    if chunk_result:
+                        all_records.extend(chunk_result)
+                    current_app.logger.info(f"--- [KuCoin Worker] Чанк {chunk_args[2].strftime('%Y-%m-%d')} для {endpoint} успешно загружен ({i+1}/{len(time_chunks)}).")
+                except Exception as exc:
+                    current_app.logger.error(f'--- [KuCoin Worker] Ошибка при загрузке чанка {chunk_args}: {exc}')
+
+        # 3. Удаляем дубликаты, которые могли появиться на границах отрезков
         unique_records_dict = {}
-        # Определяем уникальный ключ для каждого типа транзакции
-        id_key_map = {'/api/v1/deposits': 'walletTxId', '/api/v1/withdrawals': 'id', '/api/v1/fills': 'tradeId', '/api/v2/accounts/ledgers': 'id'}
+        # ИСПРАВЛЕНО: Обновлен ключ для /api/v1/accounts/ledgers
+        id_key_map = {
+            '/api/v1/deposits': 'walletTxId', 
+            '/api/v1/withdrawals': 'id', 
+            '/api/v1/fills': 'tradeId', 
+            '/api/v1/accounts/ledgers': 'id'
+        }
         id_key = id_key_map.get(endpoint)
         if not id_key:
             current_app.logger.warning(f"Ключ для дедупликации не найден для {endpoint}. Возможны дубликаты.")
             return all_records
+            
         for record in all_records:
             unique_id = record.get(id_key)
             if unique_id is not None:
                 unique_records_dict[unique_id] = record
             else:
+                # Резервный вариант для записей без уникального ID
                 unique_records_dict[json.dumps(record, sort_keys=True)] = record
         return list(unique_records_dict.values())
 
@@ -1231,9 +1252,8 @@ def fetch_kucoin_all_transactions(api_key: str, api_secret: str, passphrase: str
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю сделок KuCoin: {e}")
     try:
-        current_app.logger.info("\n--- [KuCoin] Получение истории переводов (ledgers) ---")
-        # ИСПРАВЛЕНО: Используем эндпоинт v1, так как v2 был объявлен устаревшим (deprecated).
-        # Фильтруем по bizType, чтобы получить только переводы.
+        current_app.logger.info("\n--- [KuCoin] Получение истории переводов (ledgers) ---")        
+        # Фильтруем по bizType, чтобы получить только переводы. Используем эндпоинт v1.
         all_txs['transfers'] = _fetch_kucoin_paginated_data_in_chunks('/api/v1/accounts/ledgers', base_params={'bizType': 'TRANSFER'})
     except Exception as e:
         current_app.logger.error(f"Не удалось получить историю переводов KuCoin: {e}")
