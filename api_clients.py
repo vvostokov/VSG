@@ -1149,37 +1149,42 @@ def fetch_kucoin_all_transactions(api_key: str, api_secret: str, passphrase: str
     ИСПРАВЛЕНО: Добавлена логика для обхода 24-часового ограничения API KuCoin
     путем итерации по временному диапазону с шагом в 24 часа.
     """
-    current_app.logger.info(f"Получение истории транзакций с KuCoin (параллельный режим) с ключом: {api_key[:5]}...")
+    current_app.logger.info(f"Получение истории транзакций с KuCoin (параллельный режим) с ключом: {api_key[:5]}...") # noqa
     if not api_key or not api_secret or not passphrase:
         raise Exception("Для KuCoin необходимы API ключ, секрет и парольная фраза.")
+
+    # ИСПРАВЛЕНО: Получаем реальный объект приложения, чтобы передать его контекст в другие потоки.
+    app = current_app._get_current_object()
 
     def _fetch_single_kucoin_chunk(args):
         """
         (Внутренняя функция для ThreadPoolExecutor) Получает все страницы данных для одного временного отрезка.
         """
-        endpoint, base_params, chunk_start_time, chunk_end_time = args
-        chunk_records = []
-        current_page = 1
-        while True:
-            params = base_params.copy() if base_params else {}
-            params['currentPage'] = current_page
-            params['pageSize'] = 500
-            params['startAt'] = int(chunk_start_time.timestamp() * 1000)
-            params['endAt'] = int(chunk_end_time.timestamp() * 1000)
+        # ИСПРАВЛЕНО: Создаем контекст приложения, так как эта функция выполняется в отдельном потоке.
+        with app.app_context():
+            endpoint, base_params, chunk_start_time, chunk_end_time = args
+            chunk_records = []
+            current_page = 1
+            while True:
+                params = base_params.copy() if base_params else {}
+                params['currentPage'] = current_page
+                params['pageSize'] = 500
+                params['startAt'] = int(chunk_start_time.timestamp() * 1000)
+                params['endAt'] = int(chunk_end_time.timestamp() * 1000)
 
-            response_data = _kucoin_api_get(api_key, api_secret, passphrase, endpoint, params)
-            if not response_data or not response_data.get('data', {}).get('items'):
-                break
-            
-            records = response_data['data']['items']
-            chunk_records.extend(records)
-            
-            if len(records) < params['pageSize']:
-                break
-            
-            current_page += 1
-            time.sleep(0.3) # Задержка для соблюдения rate limit
-        return chunk_records
+                response_data = _kucoin_api_get(api_key, api_secret, passphrase, endpoint, params)
+                if not response_data or not response_data.get('data', {}).get('items'):
+                    break
+                
+                records = response_data['data']['items']
+                chunk_records.extend(records)
+                
+                if len(records) < params['pageSize']:
+                    break
+                
+                current_page += 1
+                time.sleep(0.3) # Задержка для соблюдения rate limit
+            return chunk_records
 
     def _fetch_kucoin_paginated_data_in_chunks(endpoint, base_params=None):
         """
