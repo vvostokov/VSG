@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
 
-from extensions import db, migrate
+from extensions import db, migrate, scheduler
 
 def create_app():
     """Application Factory."""
@@ -47,9 +47,34 @@ def create_app():
     # --- CryptoCompare News API Key ---
     app.config['CRYPTOCOMPARE_API_KEY'] = os.environ.get('CRYPTOCOMPARE_API_KEY')
 
+    # --- Scheduler Configuration ---
+    app.config['SCHEDULER_API_ENABLED'] = True
+    app.config['JOBS'] = [
+        {
+            'id': 'job_update_news_cache',
+            'func': 'background_tasks:update_all_news_in_background',
+            'trigger': 'interval',
+            'minutes': 30
+        },
+        {
+            'id': 'job_sync_platforms',
+            'func': 'background_tasks:sync_all_platforms_in_background',
+            'trigger': 'interval',
+            'hours': 2 # Синхронизировать балансы и транзакции каждые 2 часа
+        },
+        {
+            'id': 'job_update_usdt_rub_rate',
+            'func': 'background_tasks:update_usdt_rub_rate_in_background',
+            'trigger': 'interval',
+            'minutes': 15 # Обновлять курс каждые 15 минут
+        }
+    ]
+
     # --- Initialize Extensions ---
     db.init_app(app)
     migrate.init_app(app, db)
+    scheduler.init_app(app)
+    scheduler.start()
 
     # --- Register Jinja Filters ---
     @app.template_filter()
@@ -60,6 +85,25 @@ def create_app():
             return value.rstrip('0').rstrip('.')
         return value
 
+    @app.template_filter()
+    def money_format(value, precision=2):
+        """Форматирует число как денежную сумму с пробелами в качестве разделителей тысяч."""
+        if value is None:
+            return '-'
+        try:
+            return f"{Decimal(value):,.{precision}f}".replace(',', ' ')
+        except (ValueError, TypeError):
+            return str(value)
+    @app.template_filter()
+    def money_format(value, precision=2):
+        """Форматирует число как денежную сумму с пробелами в качестве разделителей тысяч."""
+        if value is None:
+            return '-'
+        try:
+            return f"{Decimal(value):,.{precision}f}".replace(',', ' ')
+        except (ValueError, TypeError):
+            return str(value)
+        
     @app.template_filter()
     def timestamp_to_datetime(ts):
         """Converts a UNIX timestamp to a timezone-aware datetime object."""

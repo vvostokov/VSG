@@ -11,13 +11,15 @@ from models import JsonCache
 from extensions import db
 from api_clients import fetch_cryptocompare_news
 from translation_logic import translate_text
+# ИЗМЕНЕНО: Импортируем новую функцию для анализа тональности через LLM
+from logic.llm_sentiment_logic import get_sentiment_g4f
 
 # --- Константы ---
 NEWS_CACHE_TTL_MINUTES = 30
 # ИЗМЕНЕНО: Используем RSS-ленты, сфокусированные на российском рынке.
 SECURITIES_RSS_URLS = [
     "https://ru.investing.com/rss/news_301.rss", # Новости - Фондовый рынок - Россия
-    "https://ru.investing.com/rss/news_8.rss",   # Новости - Экономические новости - Россия
+    "https://ru.investing.com/rss/news_25.rss",   # Новости - Экономические новости - Россия (ИСПРАВЛЕНО: news_8.rss больше не работает)
 ]
 
 def _fetch_rss_news(feed_url: str, limit: int = 50) -> list:
@@ -139,7 +141,21 @@ def get_crypto_news(limit: int = 50, categories: str = None):
         translated = []
         for article in news_raw:
             article['title_ru'] = translate_text(article.get('title', ''))
-            article['body_ru'] = translate_text(article.get('body', ''))
+            body_ru = translate_text(article.get('body', ''))
+            article['body_ru'] = body_ru
+ 
+            # ОТКЛЮЧЕНО: Анализ тональности через g4f временно отключен из-за нестабильности.
+            # # ИЗМЕНЕНО: Выполняем анализ тональности с помощью g4f,
+            # # так как API CryptoCompare не возвращает 'sentiment'.
+            # # Используем русский текст, так как он уже очищен и переведен.
+            # llm_score = get_sentiment_g4f(body_ru)
+ 
+            # if llm_score is not None:
+            #     # Сохраняем результат в формате, совместимом с остальным приложением.
+            #     # 'compound' используется для определения позитива/негатива (значения от -1.0 до 1.0).
+            #     # 'llm_score' - это исходная оценка от -100 до 100 для отображения.
+            #     article['sentiment'] = {'compound': llm_score / 100.0, 'llm_score': llm_score}
+
             translated.append(article)
         return translated
 

@@ -40,15 +40,15 @@
     <!-- Charts Row -->
     <div class="row">
         <div class="col-lg-8 mb-4">
-            <div class="card">
-                <div class="card-header">История стоимости портфеля (RUB)</div>
+            <div class="card h-100">
+                <div class="card-header">История стоимости криптопортфеля (RUB)</div>
                 <div class="card-body">
                     <canvas id="portfolioHistoryChart"></canvas>
                 </div>
             </div>
         </div>
         <div class="col-lg-4 mb-4">
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">Распределение активов</div>
                 <div class="card-body">
                     <canvas id="assetDistributionChart"></canvas>
@@ -57,43 +57,21 @@
         </div>
     </div>
 
-    <!-- News Section -->
+    <!-- New Analytics Charts Row -->
     <div class="row">
-        <div class="col-12">
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Последние новости</h5>
-                    <a href="{{ url_for('main.ui_crypto_news') }}">Все новости &rarr;</a>
+        <div class="col-lg-8 mb-4">
+            <div class="card h-100">
+                <div class="card-header">Прибыль / Убыток (PnL) по активам (USDT)</div>
+                <div class="card-body">
+                    <canvas id="pnlBarChart"></canvas>
                 </div>
-                <div class="list-group list-group-flush">
-                    {% if latest_news %}
-                        {% for article in latest_news %}
-                            <a href="{{ article.url }}" target="_blank" rel="noopener noreferrer" class="list-group-item list-group-item-action">
-                                <div class="d-flex w-100 justify-content-between">
-                                    <h6 class="mb-1">
-                                        {{ article.title_ru }}
-                                        {% if article.sentiment and article.sentiment.compound is defined %}
-                                            {% set compound = article.sentiment.compound %}
-                                            {% if compound >= 0.05 %}
-                                                <span class="badge badge-success ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Позитивная</span>
-                                            {% elif compound <= -0.05 %}
-                                                <span class="badge badge-danger ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Негативная</span>
-                                            {% else %}
-                                                <span class="badge badge-secondary ml-2" title="Compound: {{ '%.2f'|format(compound) }}">Нейтральная</span>
-                                            {% endif %}
-                                        {% endif %}
-                                    </h6>
-                                    <small class="text-muted">{{ article.published_on | timestamp_to_datetime | datetime_format('%d.%m %H:%M') }}</small>
-                                </div>
-                                <p class="mb-1 small text-muted">{{ article.body_ru | truncate(150) }}</p>
-                                <small class="text-muted">{{ article.source_info.name }}</small>
-                            </a>
-                        {% endfor %}
-                    {% else %}
-                        <div class="list-group-item">
-                            <p class="text-center text-muted mb-0">Новости не найдены.</p>
-                        </div>
-                    {% endif %}
+            </div>
+        </div>
+        <div class="col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header">Распределение по платформам</div>
+                <div class="card-body">
+                    <canvas id="platformDistributionChart"></canvas>
                 </div>
             </div>
         </div>
@@ -116,12 +94,15 @@
                             <th>24ч %</th>
                             <th>7д %</th>
                             <th>30д %</th>
+                            <th>90д %</th>
+                            <th>180д %</th>
+                            <th>365д %</th>
                             <th>Локации</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% if assets %}
-                            {% for ticker, data in assets %}
+                            {% for ticker, data in assets %} {# ticker - это ключ (например, 'BTC'), data - словарь со значениями #}
                             <tr>
                                 <td><strong>{{ ticker }}</strong></td>
                                 <td>{{ format_decimal(data.total_quantity, 8) }}</td>
@@ -130,16 +111,31 @@
                                 <td>{{ format_percent(data['24h']) }}</td>
                                 <td>{{ format_percent(data['7d']) }}</td>
                                 <td>{{ format_percent(data['30d']) }}</td>
-                                <td>
-                                    {% for loc in data.locations %}
-                                        <small><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=loc.platform_id) }}">{{ loc.platform_name }}</a> ({{ loc.account_type }}): {{ format_decimal(loc.quantity, 8) }}</small><br>
-                                    {% endfor %}
+                                <td>{{ format_percent(data['90d']) }}</td>
+                                <td>{{ format_percent(data['180d']) }}</td>
+                                <td>{{ format_percent(data['365d']) }}</td>
+                                <td class="position-relative">
+                                    {# ИСПРАВЛЕНО: Тег <a> заменен на <button> для предотвращения перехода #}
+                                    {# наверх страницы при клике. Атрибут href="#" в теге <a> является причиной #}
+                                    {# этого поведения. <button> семантически корректнее для действия, #}
+                                    {# не являющегося навигацией, и решает проблему. #}
+                                    <button class="btn btn-light btn-sm" type="button" data-toggle="collapse" data-target="#locations-{{ ticker | replace('.', '-') }}" aria-expanded="false" aria-controls="locations-{{ ticker | replace('.', '-') }}"><i class="fas fa-chevron-down"></i></button>
+                                    <div class="collapse position-absolute bg-light border p-2 rounded shadow-sm" id="locations-{{ ticker | replace('.', '-') }}" style="z-index: 10; right: 0;">
+                                        <div class="pt-2" style="min-width: 250px;">
+                                        {% for loc in data.locations %}
+                                            <div class="d-flex justify-content-between">
+                                                <small><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=loc.platform_id) }}">{{ loc.platform_name }}</a> ({{ loc.account_type }})</small>
+                                                <small class="text-nowrap pl-3">{{ format_decimal(loc.quantity, 8) }}</small>
+                                            </div>
+                                        {% endfor %}
+                                        </div>
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="8" class="text-center">Крипто-активы не найдены.</td>
+                                <td colspan="11" class="text-center">Крипто-активы не найдены.</td>
                             </tr>
                         {% endif %}
                     </tbody>
@@ -163,28 +159,28 @@
                     labels: {{ chart_labels | safe }},
                     datasets: [{
                         data: {{ chart_data | safe }},
-                        backgroundColor: ['#007bff', '#28a745', '#17a2b8', '#ffc107', '#dc3545', '#6c757d', '#343a40', '#f8f9fa', '#e9ecef', '#007bff'],
+                        backgroundColor: ['#007bff', '#28a745', '#17a2b8', '#ffc107', '#dc3545', '#6c757d', '#343a40', '#0d6efd', '#6610f2', '#6f42c1'],
                     }],
                 },
                 options: {
                     maintainAspectRatio: false,
-                    tooltips: {
-                        callbacks: {
-                            label: function(tooltipItem, data) {
-                                var dataset = data.datasets[tooltipItem.datasetIndex];
-                                var total = dataset.data.reduce(function(previousValue, currentValue, currentIndex, array) {
-                                    return previousValue + currentValue;
-                                });
-                                var currentValue = dataset.data[tooltipItem.index];
-                                var percentage = Math.floor(((currentValue/total) * 100)+0.5);
-                                return data.labels[tooltipItem.index] + ': ' + percentage + '%';
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const currentValue = context.raw;
+                                    const total = context.chart.data.datasets[context.datasetIndex].data.reduce((a, b) => a + b, 0);
+                                    const percentage = Math.round((currentValue / total) * 100);
+                                    return `${label}: ${percentage}%`;
+                                }
                             }
                         }
-                    },
-                    legend: {
-                        display: true,
-                        position: 'bottom'
-                    },
+                    }
                 },
             });
         }
@@ -198,7 +194,8 @@
                     labels: {{ chart_history_labels | safe }},
                     datasets: [{
                         label: "Стоимость (RUB)",
-                        lineTension: 0.3,
+                        tension: 0.3,
+                        fill: true,
                         backgroundColor: "rgba(0, 123, 255, 0.05)",
                         borderColor: "rgba(0, 123, 255, 1)",
                         pointRadius: 3,
@@ -215,47 +212,136 @@
                 options: {
                     maintainAspectRatio: false,
                     scales: {
-                        xAxes: [{
-                            time: {
-                                unit: 'date'
-                            },
-                            gridLines: {
+                        x: {
+                            grid: {
                                 display: false
                             },
                             ticks: {
                                 maxTicksLimit: 7
                             }
-                        }],
-                        yAxes: [{
+                        },
+                        y: {
                             ticks: {
                                 maxTicksLimit: 5,
                                 callback: function(value, index, values) {
                                     return value.toLocaleString('ru-RU') + ' ₽';
                                 }
                             },
-                            gridLines: {
+                            grid: {
                                 color: "rgb(234, 236, 244)",
                             }
-                        }],
+                        }
                     },
-                    legend: {
-                        display: false
-                    },
-                    tooltips: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: function(tooltipItem, data) {
-                                var label = data.datasets[tooltipItem.datasetIndex].label || '';
-                                if (label) {
-                                    label += ': ';
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(context.parsed.y);
+                                    }
+                                    return label;
                                 }
-                                label += parseFloat(tooltipItem.yLabel).toLocaleString('ru-RU', { style: 'currency', currency: 'RUB' });
-                                return label;
                             }
                         }
                     }
                 }
+            });
+        }
+
+        // PnL Bar Chart
+        var ctxPnl = document.getElementById('pnlBarChart');
+        if (ctxPnl) {
+            const pnlData = {{ pnl_chart_data | safe }};
+            new Chart(ctxPnl, {
+                type: 'bar',
+                data: {
+                    labels: {{ pnl_chart_labels | safe }},
+                    datasets: [{
+                        label: 'PnL (USDT)',
+                        data: pnlData,
+                        backgroundColor: pnlData.map(value => value >= 0 ? 'rgba(40, 167, 69, 0.7)' : 'rgba(220, 53, 69, 0.7)'),
+                        borderColor: pnlData.map(value => value >= 0 ? 'rgba(40, 167, 69, 1)' : 'rgba(220, 53, 69, 1)'),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    indexAxis: 'y', // Horizontal bar chart
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value, index, values) {
+                                    return value.toLocaleString('en-US') + ' $';
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.x !== null) {
+                                        label += new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(context.parsed.x);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Platform Distribution Pie Chart
+        var ctxPlatformPie = document.getElementById('platformDistributionChart');
+        if (ctxPlatformPie) {
+            new Chart(ctxPlatformPie, {
+                type: 'doughnut',
+                data: {
+                    labels: {{ platform_pie_labels | safe }},
+                    datasets: [{
+                        data: {{ platform_pie_data | safe }},
+                        backgroundColor: ['#6f42c1', '#fd7e14', '#20c997', '#6c757d', '#0dcaf0', '#d63384', '#ffc107'],
+                    }],
+                },
+                options: {
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const currentValue = context.raw;
+                                    const total = context.chart.data.datasets[context.datasetIndex].data.reduce((a, b) => a + b, 0);
+                                    const percentage = total > 0 ? Math.round((currentValue / total) * 100) : 0;
+                                    const formattedValue = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(currentValue);
+                                    return `${label}: ${formattedValue} (${percentage}%)`;
+                                }
+                            }
+                        }
+                    }
+                },
             });
         }
     });

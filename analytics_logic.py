@@ -9,8 +9,8 @@ import pandas as pd
 from sqlalchemy import func
 
 from extensions import db
-from models import (
-    Transaction, InvestmentPlatform, SecuritiesPortfolioHistory, InvestmentAsset, HistoricalPriceCache, PortfolioHistory,
+from models import ( # noqa
+    Transaction, InvestmentPlatform, SecuritiesPortfolioHistory, InvestmentAsset, HistoricalPriceCache, CryptoPortfolioHistory,
     JsonCache
 )
 from securities_logic import (
@@ -54,7 +54,7 @@ def refresh_securities_portfolio_history():
     historical_prices_by_secid = fetch_moex_historical_price_range(secids_to_fetch, start_date, end_date)
 
     # 4. Проходим по дням и считаем портфель, используя кэш цен
-    SecuritiesPortfolioHistory.query.delete()
+    SecuritiesPortfolioHistory.query.delete() # noqa
     db.session.commit()
 
     holdings = defaultdict(Decimal)
@@ -107,7 +107,7 @@ def refresh_crypto_portfolio_history():
     """
     print("--- [Analytics] Начало обновления истории крипто-портфеля (оптимизированная версия) ---")
     
-    first_tx = Transaction.query.join(InvestmentPlatform).filter(
+    first_tx = Transaction.query.join(InvestmentPlatform).filter( # noqa
         InvestmentPlatform.platform_type == 'crypto_exchange'
     ).order_by(Transaction.timestamp.asc()).first()
 
@@ -142,7 +142,7 @@ def refresh_crypto_portfolio_history():
         time.sleep(0.2) # Небольшая задержка между запросами по тикерам
 
     # 3. Проходим по дням и считаем портфель, используя кэш цен
-    PortfolioHistory.query.delete()
+    CryptoPortfolioHistory.query.delete()
     db.session.commit()
 
     holdings = defaultdict(Decimal)
@@ -194,7 +194,7 @@ def refresh_crypto_portfolio_history():
                 print(f"--- [Analytics Warning] Не найдена историческая цена для {ticker} на {current_date} или ранее.")
         
         total_value_rub = total_value_usdt * currency_rates_to_rub.get('USDT', Decimal(1.0))
-        db.session.add(PortfolioHistory(date=current_date, total_value_rub=total_value_rub))
+        db.session.add(CryptoPortfolioHistory(date=current_date, total_value_rub=total_value_rub))
 
     db.session.commit()
     print(f"--- [Analytics] История крипто-портфеля обновлена с {start_date} по {end_date}. ---")
@@ -430,3 +430,44 @@ def refresh_market_leaders_cache():
         db.session.rollback()
         print(f"--- [Analytics ERROR] Ошибка при обновлении кэша лидеров рынка: {e}")
         return False, f"Ошибка при обновлении кэша лидеров рынка: {e}"
+
+def get_crypto_portfolio_overview():
+    """
+    Агрегирует данные по крипто-портфелю, группируя по тикерам.
+    Возвращает словарь с агрегированными данными и общую стоимость в рублях.
+    Эта функция используется для анализа новостей и не влияет на основной дашборд.
+    """
+    # Временное решение для курсов, в будущем можно вынести в общую утилиту
+    currency_rates_to_rub = {'USDT': Decimal('90.0'), 'RUB': Decimal('1.0')}
+    
+    all_crypto_assets = InvestmentAsset.query.join(InvestmentPlatform).filter(
+        InvestmentPlatform.platform_type == 'crypto_exchange',
+        InvestmentAsset.quantity > 0
+    ).all()
+
+    aggregated_assets = defaultdict(lambda: {
+        'total_quantity': Decimal(0),
+        'total_value_rub': Decimal(0),
+        'total_value_usdt': Decimal(0),
+        'current_price': Decimal(0),
+    })
+
+    for asset in all_crypto_assets:
+        ticker = asset.ticker
+        quantity = asset.quantity or Decimal(0)
+        price = asset.current_price or Decimal(0)
+        
+        asset_value_usdt = quantity * price
+        # Используем курс USDT для конвертации в рубли
+        asset_value_rub = asset_value_usdt * currency_rates_to_rub.get('USDT', Decimal(1.0))
+
+        agg = aggregated_assets[ticker]
+        agg['total_quantity'] += quantity
+        agg['total_value_usdt'] += asset_value_usdt
+        agg['total_value_rub'] += asset_value_rub
+        agg['current_price'] = price
+
+    grand_total_rub = sum(v['total_value_rub'] for v in aggregated_assets.values())
+    
+    # Возвращаем словарь и общую стоимость, как ожидает news_analysis
+    return dict(aggregated_assets), grand_total_rub

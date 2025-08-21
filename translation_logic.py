@@ -3,6 +3,7 @@ from flask import current_app
 from deep_translator import GoogleTranslator
 from models import TranslationCache
 from extensions import db
+from sqlalchemy.exc import IntegrityError
 
 def translate_text(text: str, source: str = 'en', target: str = 'ru') -> str:
     """
@@ -11,6 +12,12 @@ def translate_text(text: str, source: str = 'en', target: str = 'ru') -> str:
     """
     if not text or not isinstance(text, str):
         return ""
+
+    # ИЗМЕНЕНО: Добавляем ограничение на длину текста, чтобы избежать ошибок API.
+    # API Google Translate имеет ограничение около 5000 символов.
+    # Устанавливаем лимит с запасом, чтобы гарантировать успешный перевод.
+    if len(text) > 4900:
+        text = text[:4900]
 
     # Используем MD5 хэш от текста в качестве ключа для кэша
     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
@@ -41,6 +48,12 @@ def translate_text(text: str, source: str = 'en', target: str = 'ru') -> str:
         db.session.add(new_cache_entry)
         db.session.commit()
         return translated_text
+    except IntegrityError:
+        # Эта ошибка возникает, если два процесса одновременно пытаются вставить одну и ту же запись.
+        # Это безопасно, так как запись уже будет в БД. Просто откатываем нашу сессию.
+        db.session.rollback()
+        current_app.logger.info(f"--- [Translation] Race condition detected for hash: {text_hash}. Another process saved it first.")
+        return translated_text # Возвращаем результат, который мы уже получили от API
     except Exception as e:
         current_app.logger.error(f"Ошибка во время перевода: {e}")
         db.session.rollback()

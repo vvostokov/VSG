@@ -4,7 +4,8 @@ from analytics_logic import (
     refresh_crypto_price_change_data,
     refresh_crypto_portfolio_history,
     refresh_securities_portfolio_history,
-    refresh_performance_chart_data
+    refresh_performance_chart_data,
+    refresh_securities_price_change_data
 )
 from models import Bank, Category
 from extensions import db
@@ -82,7 +83,8 @@ def refresh_all_command():
         ("кэша цен криптоактивов", refresh_crypto_price_change_data),
         ("графика производительности", refresh_performance_chart_data),
         ("истории крипто-портфеля", refresh_crypto_portfolio_history),
-        ("истории портфеля ЦБ", refresh_securities_portfolio_history)
+        ("истории портфеля ЦБ", refresh_securities_portfolio_history),
+        ("кэша цен ценных бумаг", refresh_securities_price_change_data)
     ]:
         print(f"\n-> Обновление {name}...")
         success, message = func()

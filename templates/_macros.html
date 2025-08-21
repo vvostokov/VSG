@@ -1,0 +1,40 @@
+{% macro render_pagination(pagination, endpoint, query_params={}) %}
+    {% if pagination and pagination.pages > 1 %}
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center">
+                {# Previous Page Link #}
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for(endpoint, page=pagination.prev_num, **query_params) if pagination.has_prev else '#' }}">&laquo;</a>
+                </li>
+
+                {# Page Numbers #}
+                {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                    {% if p %}
+                        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for(endpoint, page=p, **query_params) }}">{{ p }}</a>
+                        </li>
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+
+                {# Next Page Link #}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link" href="{{ url_for(endpoint, page=pagination.next_num, **query_params) if pagination.has_next else '#' }}">&raquo;</a>
+                </li>
+            </ul>
+        </nav>
+    {% endif %}
+{% endmacro %}
+
+{% macro format_decimal(value, precision=2) %}
+    {% if value is none or value is not defined %}-{% else %}{{ value|money_format(precision) }}{% endif %}
+{% endmacro %}
+
+{% macro format_percent(value) %}
+    {% if value is none or value is not defined %}<span class="text-muted">-</span>
+    {% elif value > 0 %}<span class="text-success">+{{ "%.2f"|format(value) }}%</span>
+    {% elif value < 0 %}<span class="text-danger">{{ "%.2f"|format(value) }}%</span>
+    {% else %}<span class="text-muted">0.00%</span>
+    {% endif %}
+{% endmacro %}

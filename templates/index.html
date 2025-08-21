@@ -93,22 +93,118 @@
         </div>
     </div>
 
-    <!-- Обзор рынков -->
+    <!-- Debt Summary Row -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-4">
+            <div class="card text-center h-100 border-danger">
+                <div class="card-header bg-transparent border-danger text-danger">Мои долги (Я должен)</div>
+                <div class="card-body">
+                    <p class="card-text h3 text-danger">{{ "%.2f"|format(debt_summary.i_owe) }} RUB</p>
+                    <a href="{{ url_for('main.ui_debts') }}" class="btn btn-outline-danger mt-2">К долгам &rarr;</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card text-center h-100 border-success">
+                <div class="card-header bg-transparent border-success text-success">Мне должны</div>
+                <div class="card-body">
+                    <p class="card-text h3 text-success">{{ "%.2f"|format(debt_summary.owed_to_me) }} RUB</p>
+                    <a href="{{ url_for('main.ui_debts') }}" class="btn btn-outline-success mt-2">К долгам &rarr;</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Summary Row for Debts and Last Txs -->
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Операции по ЦБ</h5>
+                    <a href="{{ url_for('securities.ui_securities_transactions') }}">Все операции &rarr;</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% if last_securities_txs %}
+                        {% for tx in last_securities_txs %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <div>
+                                        <h6 class="mb-1">{{ tx.description }}</h6>
+                                        <small class="text-muted">{{ tx.source }}</small>
+                                    </div>
+                                    <div class="text-end">
+                                        <strong class="text-nowrap {% if tx.is_positive %}text-success{% else %}text-danger{% endif %}">{{ tx.value }}</strong>
+                                        <small class="d-block text-muted">{{ tx.timestamp.strftime('%d.%m %H:%M') }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-group-item text-center text-muted">Операций не найдено.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Последние операции</h5>
+                    <a href="{{ url_for('main.ui_transactions') }}">Все операции &rarr;</a>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% if last_transactions %}
+                        {% for tx in last_transactions %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <div>
+                                        <h6 class="mb-1">{{ tx.description }}</h6>
+                                        <small class="text-muted">{{ tx.source }}</small>
+                                    </div>
+                                    <div class="text-end">
+                                        <strong class="text-nowrap {% if tx.is_investment %}text-info{% elif tx.is_positive %}text-success{% else %}text-danger{% endif %}">{{ tx.value }}</strong>
+                                        <small class="d-block text-muted">{{ tx.timestamp.strftime('%d.%m %H:%M') }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-group-item text-center text-muted">Операций не найдено.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Movers -->
     <div class="row mb-4">
         <div class="col-md-6 mb-4">
             <div class="card">
-                <div class="card-header">Рынок РФ</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    Топ-5 активов ЦБ
+                    <a href="{{ url_for('securities.ui_securities_assets') }}" class="btn btn-sm btn-outline-primary">Все активы &rarr;</a>
+                </div>
                 <div class="card-body">
                     <table class="table table-sm">
-                        <tbody>
-                        {% for item in moex_leaders %}
+                        <thead>
                             <tr>
-                                <td><strong>{{ item.ticker }}</strong></td>
-                                <td class="text-right">{{ "%.2f"|format(item.price) }}</td>
-                                <td class="text-right">{{ render_change(item.change_pct) }}</td>
+                                <th>Актив</th>
+                                <th class="text-right">Стоимость</th>
+                                <th class="text-right">24ч</th>
+                                <th class="text-right">7д</th>
+                                <th class="text-right">30д</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for item in top_5_securities %}
+                            <tr>
+                                <td><strong>{{ item.asset.ticker }}</strong><br><small class="text-muted">{{ item.asset.name | truncate(25) }}</small></td>
+                                <td class="text-right text-nowrap">{{ "%.0f"|format(item.value_rub) }} ₽</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('1d')) }}</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('7d')) }}</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('30d')) }}</td>
                             </tr>
                         {% else %}
-                            <tr><td colspan="3" class="text-muted">Не удалось загрузить данные.</td></tr>
+                            <tr><td colspan="5" class="text-muted text-center">Нет активов для отображения.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>
@@ -117,18 +213,32 @@
         </div>
         <div class="col-md-6 mb-4">
             <div class="card">
-                <div class="card-header">Крипторынок</div>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    Топ-5 крипто-активов
+                    <a href="{{ url_for('main.ui_crypto_assets') }}" class="btn btn-sm btn-outline-primary">Все активы &rarr;</a>
+                </div>
                 <div class="card-body">
                     <table class="table table-sm">
-                        <tbody>
-                        {% for item in crypto_leaders %}
+                         <thead>
                             <tr>
-                                <td><strong>{{ item.ticker }}</strong></td>
-                                <td class="text-right">{{ "%.2f"|format(item.price) }}</td>
-                                <td class="text-right">{{ render_change(item.change_pct) }}</td>
+                                <th>Актив</th>
+                                <th class="text-right">Стоимость</th>
+                                <th class="text-right">24ч</th>
+                                <th class="text-right">7д</th>
+                                <th class="text-right">30д</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for item in top_5_crypto %}
+                            <tr>
+                                <td><strong>{{ item.ticker }}</strong><br><small class="text-muted">{{ item.name }}</small></td>
+                                <td class="text-right text-nowrap">{{ "%.0f"|format(item.value_rub) }} ₽</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('1d')) }}</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('7d')) }}</td>
+                                <td class="text-right text-nowrap">{{ render_change(item.changes.get('30d')) }}</td>
                             </tr>
                         {% else %}
-                            <tr><td colspan="3" class="text-muted">Не удалось загрузить данные.</td></tr>
+                            <tr><td colspan="5" class="text-muted text-center">Нет активов для отображения.</td></tr>
                         {% endfor %}
                         </tbody>
                     </table>

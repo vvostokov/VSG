@@ -18,9 +18,12 @@ from werkzeug.utils import secure_filename
 from models import InvestmentPlatform, InvestmentAsset, Transaction, MoexHistoricalPrice, HistoricalPriceCache
 from extensions import db
 from news_logic import get_securities_news
+# ИМПОРТ ДЛЯ НОВОЙ ФУНКЦИИ ЗАГРУЗКИ PDF
+from pdf_parsers import parse_bcs_report_pdf
 
 # Создаем Blueprint для маршрутов, связанных с ценными бумагами
-securities_bp = Blueprint('securities', __name__, template_folder='templates')
+# ИЗМЕНЕНО: Добавляем префикс /securities для всех маршрутов этого блюпринта для лучшей организации URL.
+securities_bp = Blueprint('securities', __name__, url_prefix='/securities', template_folder='templates')
 
 # --- Функции для работы с MOEX API ---
 
@@ -442,201 +445,168 @@ def _parse_broker_portfolio_report(file_path):
             continue # Пробуем следующий парсер
     return []
 
-def _parse_bcs_tdsheet_report(xls_file):
+def _parse_bcs_universal_deals_report(xls_file):
     """
-    Парсер для отчетов по сделкам от брокера БКС (формат с листом TDSheet).
-    Ищет лист, содержащий раздел '2.1. Сделки:', и обрабатывает его.
-    Логика основана на предоставленном пользователем примере.
+    Универсальный и более надежный парсер для отчетов по сделкам от брокера БКС.
+    Он объединяет логику предыдущих парсеров и добавляет гибкости.
+    - Ищет раздел со сделками по разным ключевым словам.
+    - Гибко находит заголовок таблицы и сопоставляет колонки.
+    - Обрабатывает отчеты, где сделки по разным активам сгруппированы.
+    - Игнорирует секции, не связанные с ЦБ (например, фьючерсы).
     """
-    current_app.logger.info("--- [BCS TDSheet Parser] Начало работы парсера...")
-    
-    # Итерируем по всем листам, чтобы найти нужный по содержимому.
+    current_app.logger.info("--- [BCS Universal Deals Parser] Начало работы...")
+
+    # Ключевые слова для поиска начала раздела
+    section_start_keywords = ['2.1. Сделки:', 'Сделки купли/продажи ЦБ']
+    # Ключевые слова для поиска конца раздела
+    section_end_keywords = [r'^\s*3\.\s*Активы:', r'^\s*2\.2\.\s*']
+    # Ключевые слова для игнорирования секций
+    ignore_section_keywords = ['Инструменты срочного рынка']
+
+    # Карта для гибкого сопоставления колонок
+    column_map = {
+        'id': ['Номер', 'Номер сделки'],
+        'date': ['Дата'],
+        'time': ['Время соверш.', 'Время сделки', 'Время'],
+        'buy_qty': ['Куплено, шт'],
+        'buy_price': ['Цена'], # Цена покупки
+        'buy_sum': ['Сумма платежа'],
+        'sell_qty': ['Продано, шт'],
+        'sell_price': ['Цена'], # Цена продажи
+        'sell_sum': ['Сумма выручки'],
+        'currency': ['Валюта'],
+        'fee': ['Комиссия Брокера', 'Комиссия'],
+    }
+
+    all_transactions = []
+
     for sheet_name in xls_file.sheet_names:
-        current_app.logger.info(f"--- [BCS TDSheet Parser] Проверка листа: '{sheet_name}'")
         try:
             df = pd.read_excel(xls_file, sheet_name=sheet_name, header=None)
-            
-            # Ищем маркеры начала и конца таблицы
-            start_idx, end_idx = -1, -1
-            for i, row in df.iterrows():
-                # Проверяем все ячейки в строке на наличие маркеров
-                row_str_content = ' '.join([str(cell).strip() for cell in row if pd.notna(cell)])
-                
-                if start_idx == -1 and '2.1. Сделки:' in row_str_content:
-                    start_idx = i
-                    current_app.logger.info(f"--- [BCS TDSheet Parser] Найден маркер начала '2.1. Сделки:' на листе '{sheet_name}' в строке {i}")
-                    continue # Продолжаем поиск конца таблицы
-                
-                if start_idx != -1 and re.search(r'3\..*Активы:', row_str_content):
-                    end_idx = i
-                    current_app.logger.info(f"--- [BCS TDSheet Parser] Найден маркер конца '3. Активы:' на листе '{sheet_name}' в строке {i}")
-                    break
-            
-            # Если не нашли начало, это не тот лист
-            if start_idx == -1:
+            if df.empty:
                 continue
             
-            # Если не нашли конец, берем до конца датафрейма
-            if end_idx == -1:
-                end_idx = len(df)
-                current_app.logger.info(f"--- [BCS TDSheet Parser] Маркер конца не найден, используется конец листа (строка {end_idx})")
-
-            transactions = []
+            in_deals_section = False
+            in_ignored_section = False
             current_asset_info = None
+            header_indices = {}
 
-            for i in range(start_idx + 1, end_idx):
+            for i, row in df.iterrows():
                 row = df.iloc[i]
-                
-                if row.isnull().all():
+                row_str = ' '.join([str(cell).strip() for cell in row if pd.notna(cell)])
+                if not row_str: continue
+
+                # Проверяем, не вошли ли мы в секцию фьючерсов
+                if any(re.search(keyword, row_str, re.IGNORECASE) for keyword in ignore_section_keywords):
+                    current_app.logger.info(f"--- [BCS Universal] Обнаружена игнорируемая секция: '{row_str}'")
+                    in_ignored_section = True
+                    in_deals_section = False # Выходим из секции сделок, если она была активна
+                    current_asset_info = None
+                    header_indices = {}
                     continue
                 
-                first_cell_str = str(row.iloc[0]).strip()
+                # Проверяем, не закончился ли раздел
+                if in_deals_section and any(re.search(keyword, row_str) for keyword in section_end_keywords):
+                    current_app.logger.info(f"--- [BCS Universal] Обнаружен конец раздела сделок: '{row_str}'")
+                    in_deals_section = False
+                    break # Переходим к следующему листу
 
-                if current_asset_info and first_cell_str.startswith('Итого по'):
-                    current_asset_info = None # Сбрасываем текущий актив
+                # Ищем начало раздела сделок
+                if not in_deals_section and any(keyword in row_str for keyword in section_start_keywords):
+                    current_app.logger.info(f"--- [BCS Universal] Найден раздел сделок на листе '{sheet_name}': '{row_str}'")
+                    in_deals_section = True
+                    in_ignored_section = False # Сбрасываем флаг игнорирования
                     continue
 
-                # ИСПОЛЬЗУЕМ ЛОГИКУ ИЗ СКРИПТА ПОЛЬЗОВАТЕЛЯ
-                # Строка заголовка актива: первая ячейка похожа на тикер (только заглавные буквы, цифры, подчеркивание)
-                is_asset_header = pd.notna(row.iloc[0]) and re.match(r'^[A-Z0-9_]+$', first_cell_str)
-
-                if is_asset_header:
-                    current_app.logger.info(f"--- [BCS TDSheet Parser] Найдена строка заголовка актива: {row.iloc[0]}")
-                    current_asset_info = {
-                        'ticker': str(row.iloc[0]).strip(),
-                        'isin': str(row.iloc[5]).strip() if pd.notna(row.iloc[5]) else None,
-                        'name': str(row.iloc[7]).strip() if pd.notna(row.iloc[7]) else None,
-                    }
-                    if not current_asset_info.get('isin'):
-                        current_asset_info['isin'] = current_asset_info['ticker']
+                if not in_deals_section or in_ignored_section:
                     continue
 
-                # Строка сделки: есть информация о текущем активе и первая ячейка - это дата
-                if current_asset_info and pd.notna(row.iloc[0]) and re.match(r'\d{2}\.\d{2}\.\d{2}', first_cell_str):
+                # Внутри раздела сделок ищем информацию об активе
+                isin_match = re.search(r'ISIN:\s*([A-Z0-9]+)', row_str)
+                if isin_match:
+                    name_candidate = str(row.iloc[7]).strip() if len(row) > 7 and pd.notna(row.iloc[7]) and str(row.iloc[7]).strip() else isin_match.group(1)
+                    current_asset_info = {'isin': isin_match.group(1), 'name': name_candidate}
+                    header_indices = {} # Сбрасываем заголовки для нового актива
+                    current_app.logger.info(f"--- [BCS Universal] Найден актив: {current_asset_info}")
+                    continue
+
+                # Ищем заголовок таблицы
+                header_row_list = [str(c).strip() for c in row]
+                # Проверяем, что это заголовок, по наличию ключевых колонок
+                if 'Дата' in header_row_list and 'Куплено, шт' in header_row_list and 'Продано, шт' in header_row_list:
+                    header_indices = {}
+                    # Find all indices for 'Цена'
+                    price_indices = [idx for idx, col_name in enumerate(header_row_list) if col_name == 'Цена']
+                    
+                    # Map other columns
+                    for key, names in column_map.items():
+                        if key in ['buy_price', 'sell_price']: continue # Skip price for now
+                        for name in names:
+                            try:
+                                header_indices[key] = header_row_list.index(name)
+                                break
+                            except ValueError:
+                                continue
+                    
+                    # Map price columns specifically
+                    if len(price_indices) > 0:
+                        header_indices['buy_price'] = price_indices[0]
+                    if len(price_indices) > 1:
+                        header_indices['sell_price'] = price_indices[1]
+
+                    current_app.logger.info(f"--- [BCS Universal] Найден и обработан заголовок таблицы. Индексы: {header_indices}")
+                    continue
+
+                # Парсим строку транзакции, если есть информация об активе и заголовках
+                first_cell = row.iloc[0]
+                is_transaction_row = False
+                if pd.notna(first_cell):
+                    if isinstance(first_cell, datetime):
+                        is_transaction_row = True
+                    elif isinstance(first_cell, str) and (re.match(r'\d{2}\.\d{2}\.\d{4}', first_cell.strip()) or re.match(r'\d{2}\.\d{2}\.\d{2}', first_cell.strip())):
+                        is_transaction_row = True
+
+                if current_asset_info and header_indices and 'date' in header_indices and is_transaction_row:
                     try:
-                        buy_qty = _clean_and_convert_to_decimal(row.iloc[3])
-                        sell_qty = _clean_and_convert_to_decimal(row.iloc[6])
-
+                        buy_qty = _clean_and_convert_to_decimal(row.iloc[header_indices['buy_qty']])
+                        sell_qty = _clean_and_convert_to_decimal(row.iloc[header_indices['sell_qty']])
+                        
                         if buy_qty > 0:
-                            trade_type, quantity, price, total_sum = 'buy', buy_qty, _clean_and_convert_to_decimal(row.iloc[4]), _clean_and_convert_to_decimal(row.iloc[5])
+                            trade_type, quantity, price, total_sum = 'buy', buy_qty, _clean_and_convert_to_decimal(row.iloc[header_indices['buy_price']]), _clean_and_convert_to_decimal(row.iloc[header_indices['buy_sum']])
                         elif sell_qty > 0:
-                            trade_type, quantity, price, total_sum = 'sell', sell_qty, _clean_and_convert_to_decimal(row.iloc[7]), _clean_and_convert_to_decimal(row.iloc[8])
+                            trade_type, quantity, price, total_sum = 'sell', sell_qty, _clean_and_convert_to_decimal(row.iloc[header_indices['sell_price']]), _clean_and_convert_to_decimal(row.iloc[header_indices['sell_sum']])
                         else:
                             continue
-
-                        date_str = str(row.iloc[0]).strip()
-                        time_str = str(row.iloc[2]).strip()
+                            
+                        date_val = row.iloc[header_indices['date']]
+                        time_val = row.iloc[header_indices['time']]
+                        trade_date = pd.to_datetime(date_val).date()
+                        trade_time = pd.to_datetime(time_val).time()
+                        timestamp = datetime.combine(trade_date, trade_time).replace(tzinfo=timezone.utc)
                         
-                        try:
-                            parsed_time = pd.to_datetime(time_str.split('.')[0], format='%H:%M:%S', errors='coerce').time()
-                            if pd.isna(parsed_time): parsed_time = datetime.min.time()
-                        except (ValueError, TypeError):
-                            parsed_time = datetime.min.time()
-                        
-                        timestamp = datetime.combine(pd.to_datetime(date_str, dayfirst=True).date(), parsed_time).replace(tzinfo=timezone.utc)
-                        deal_number = str(row.iloc[1]).strip()
-                        currency = str(row.iloc[9]).strip()
-                        asset_ticker = current_asset_info.get('isin') or current_asset_info.get('ticker', 'UNKNOWN')
+                        fee = _clean_and_convert_to_decimal(row.iloc[header_indices['fee']]) if 'fee' in header_indices and header_indices['fee'] is not None else Decimal('0')
+                        currency = str(row.iloc[header_indices['currency']]).strip()
 
-                        transactions.append({
-                            'exchange_tx_id': f"bcs_td_trade_{deal_number}", 
-                            'timestamp': timestamp, 
-                            'type': trade_type, 
-                            'raw_type': f"Сделка {trade_type}", 
-                            'asset1_ticker': asset_ticker, 
-                            'asset1_amount': quantity, 
-                            'asset2_ticker': currency, 
-                            'asset2_amount': total_sum, 
-                            'execution_price': price, 
-                            'fee_amount': Decimal('0'), # Комиссии в этом отчете нет
-                            'fee_currency': currency, 
-                            'description': f"BCS (TDSheet) trade for {current_asset_info.get('name', asset_ticker)}"
+                        all_transactions.append({
+                            'exchange_tx_id': f"bcs_deal_{str(row.iloc[header_indices['id']]).strip()}", 'timestamp': timestamp, 'type': trade_type,
+                            'raw_type': f"Сделка {trade_type}", 'asset1_ticker': current_asset_info['isin'], 'asset1_amount': quantity,
+                            'asset2_ticker': currency, 'asset2_amount': total_sum, 'execution_price': price,
+                            'fee_amount': fee, 'fee_currency': currency, 'description': f"BCS deal for {current_asset_info['name']}"
                         })
                     except Exception as e:
-                        current_app.logger.warning(f"Ошибка при обработке строки сделки БКС (TDSheet) (строка {i+1}): {e}")
-                        continue
-            
-            if transactions:
-                current_app.logger.info(f"--- [BCS TDSheet Parser] Обработка листа '{sheet_name}' завершена. Найдено транзакций: {len(transactions)}")
-                return transactions
-            else:
-                # Если мы обработали лист, но не нашли транзакций, сообщаем об этом и продолжаем
-                current_app.logger.warning(f"--- [BCS TDSheet Parser] Лист '{sheet_name}' был обработан, но транзакций не найдено. Проверяется следующий лист.")
-                continue
+                        current_app.logger.warning(f"--- [BCS Universal] Ошибка при обработке строки транзакции (строка {i+1}): {e}")
+
+            if all_transactions:
+                current_app.logger.info(f"--- [BCS Universal] Обработка листа '{sheet_name}' завершена. Найдено транзакций: {len(all_transactions)}")
+                # Если нашли транзакции на одном листе, считаем, что это нужный файл и выходим
+                return all_transactions
 
         except Exception as e:
-            current_app.logger.warning(f"--- [BCS TDSheet Parser] Ошибка при обработке листа '{sheet_name}': {e}. Пробуем следующий лист.")
+            current_app.logger.error(f"--- [BCS Universal] Критическая ошибка при обработке листа '{sheet_name}': {e}", exc_info=True)
             continue
-    
-    # Если ни один лист не подошел, возвращаем пустой список
-    current_app.logger.warning("--- [BCS TDSheet Parser] Подходящий лист для этого парсера не найден во всем файле.")
-    return []
 
-def _parse_bcs_transactions_report(xls_file):
-    """
-    Парсер для отчетов по сделкам от брокера БКС.
-    Ищет лист, содержащий заголовки 'Номер сделки', 'Код финансового инструмента' и т.д.
-    """
-    current_app.logger.info("--- [BCS Standard Parser] Начало работы парсера...")
-    
-    # Итерируем по всем листам, чтобы найти нужный по содержимому.
-    for sheet_name in xls_file.sheet_names:
-        try:
-            df = pd.read_excel(xls_file, sheet_name=sheet_name, header=None)
-
-            # Ищем строку с заголовками.
-            header_row_index = -1
-            for i, row in df.iterrows():
-                row_values = [str(cell).strip() for cell in row.values if pd.notna(cell)]
-                if 'Номер сделки' in row_values and 'Код финансового инструмента' in row_values and 'Вид сделки' in row_values:
-                    header_row_index = i
-                    break
-            
-            if header_row_index == -1:
-                continue # Не нашли заголовки, это не тот лист.
-
-            current_app.logger.info(f"--- [BCS Standard Parser] Найден потенциальный лист '{sheet_name}'. Обработка...")
-            df = pd.read_excel(xls_file, sheet_name=sheet_name, header=header_row_index)
-            df.columns = df.columns.str.strip()
-
-            required_cols = ['Номер сделки', 'Дата сделки', 'Время сделки', 'Вид сделки', 'Код финансового инструмента', 'Количество, шт.', 'Цена', 'Валюта цены', 'Сумма сделки', 'Комиссия Брокера']
-            if not all(col in df.columns for col in required_cols):
-                continue
-
-            transactions = []
-            for _, row in df.iterrows():
-                try:
-                    trade_id = str(row['Номер сделки']).strip()
-                    if not trade_id or pd.isna(row['Номер сделки']): continue
-
-                    date_str = str(row['Дата сделки']).split()[0]
-                    time_str = str(row['Время сделки'])
-                    timestamp = datetime.strptime(f"{date_str} {time_str}", '%d.%m.%Y %H:%M:%S').replace(tzinfo=timezone.utc)
-
-                    trade_type_raw = str(row['Вид сделки']).lower()
-                    trade_type = 'buy' if 'купля' in trade_type_raw else ('sell' if 'продажа' in trade_type_raw else None)
-                    if not trade_type: continue
-
-                    ticker = str(row['Код финансового инструмента']).strip()
-                    quantity = _clean_and_convert_to_decimal(row['Количество, шт.'])
-                    price = _clean_and_convert_to_decimal(row['Цена'])
-                    total_sum = _clean_and_convert_to_decimal(row['Сумма сделки'])
-                    currency = str(row['Валюта цены']).strip()
-                    total_fee = _clean_and_convert_to_decimal(row.get('Комиссия Брокера', 0))
-
-                    transactions.append({'exchange_tx_id': f"bcs_trade_{trade_id}", 'timestamp': timestamp, 'type': trade_type, 'raw_type': trade_type_raw.capitalize(), 'asset1_ticker': ticker, 'asset1_amount': quantity, 'asset2_ticker': currency, 'asset2_amount': total_sum, 'execution_price': price, 'fee_amount': total_fee, 'fee_currency': currency, 'description': f"BCS trade for {ticker}"})
-                except Exception as e:
-                    current_app.logger.warning(f"Ошибка при обработке строки транзакции БКС: {e}")
-                    continue
-            
-            if transactions:
-                current_app.logger.info(f"--- [BCS Standard Parser] Обработка листа '{sheet_name}' завершена. Найдено транзакций: {len(transactions)}")
-                return transactions
-        except Exception as e:
-            current_app.logger.warning(f"--- [BCS Standard Parser] Ошибка при обработке листа '{sheet_name}': {e}. Пробуем следующий лист.")
-            continue
-            
-    return []
+    current_app.logger.warning("--- [BCS Universal] Подходящий лист для этого парсера не найден во всем файле.")
+    return all_transactions
 
 def _parse_generic_transactions_report(xls_file):
     """
@@ -706,7 +676,8 @@ def _parse_broker_transactions_report(file_path):
     """
     engine = 'openpyxl' if file_path.endswith('.xlsx') else 'xlrd'
     xls = pd.ExcelFile(file_path, engine=engine)
-    for parser_func in [_parse_bcs_tdsheet_report, _parse_bcs_transactions_report, _parse_generic_transactions_report]:
+    # ИЗМЕНЕНО: Порядок парсеров. Сначала пробуем новый универсальный парсер для БКС, затем общий.    
+    for parser_func in [_parse_bcs_universal_deals_report, _parse_generic_transactions_report]:
         try:
             transactions = parser_func(xls)
             if transactions:
@@ -718,6 +689,63 @@ def _parse_broker_transactions_report(file_path):
     return []
 
 # --- Маршруты (Views) ---
+
+@securities_bp.route('/upload-report', methods=['GET', 'POST'])
+def ui_upload_securities_report():
+    """
+    Страница для загрузки отчетов брокера (PDF, XLS, XLSX).
+    Обрабатывает PDF отчеты.
+    """
+    if request.method == 'POST':
+        platform_id = request.form.get('platform_id')
+        if not platform_id:
+            flash('Пожалуйста, выберите брокерскую платформу.', 'danger')
+            return redirect(request.url)
+
+        if 'report_file' not in request.files:
+            flash('Файл не был выбран.', 'danger')
+            return redirect(request.url)
+
+        file = request.files['report_file']
+        if file.filename == '':
+            flash('Файл не был выбран.', 'danger')
+            return redirect(request.url)
+
+        # Обрабатываем только PDF файлы, так как Excel загружается на другой странице
+        if file and file.filename.endswith('.pdf'):
+            filename = secure_filename(file.filename)
+            upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+            file_path = os.path.join(upload_folder, filename)
+            file.save(file_path)
+
+            parsed_assets = parse_bcs_report_pdf(file_path)
+            os.remove(file_path)
+
+            if not parsed_assets:
+                flash('Не удалось извлечь данные из PDF-отчета. Проверьте формат файла или лог ошибок в консоли.', 'danger')
+                return redirect(request.url)
+
+            updated_count, created_count = 0, 0
+            for parsed_asset in parsed_assets:
+                existing_asset = InvestmentAsset.query.filter_by(platform_id=platform_id, ticker=parsed_asset['ticker']).first()
+                if existing_asset:
+                    existing_asset.quantity = parsed_asset['quantity']
+                    updated_count += 1
+                else:
+                    db.session.add(InvestmentAsset(platform_id=platform_id, ticker=parsed_asset['ticker'], name=parsed_asset['name'], asset_type=parsed_asset['asset_type'], quantity=parsed_asset['quantity'], current_price=Decimal(0), currency_of_price='RUB'))
+                    created_count += 1
+            
+            try:
+                db.session.commit()
+                flash(f'Импорт из PDF успешно завершен. Обновлено: {updated_count}, Создано: {created_count} активов.', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'Ошибка при сохранении данных в БД: {e}', 'danger')
+
+            return redirect(url_for('securities.ui_securities_assets'))
+
+    broker_platforms = InvestmentPlatform.query.filter_by(platform_type='stock_broker', is_active=True).all()
+    return render_template('securities/upload_report.html', platforms=broker_platforms)
 
 @securities_bp.route('/brokers')
 def ui_brokers():
@@ -1113,7 +1141,7 @@ def ui_securities_transactions():
         query = query.order_by(asc(sort_column))
     
     # Paginate the results
-    pagination = query.paginate(page=page, per_page=current_app.config.get('ITEMS_PER_PAGE', 50), error_out=False)
+    pagination = query.paginate(page=page, per_page=50, error_out=False)
     
     # Get distinct values for filters
     platforms = InvestmentPlatform.query.filter_by(platform_type='stock_broker').order_by(InvestmentPlatform.name).all()

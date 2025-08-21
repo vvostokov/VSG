@@ -183,7 +183,8 @@ class HistoricalPriceCache(db.Model):
     last_updated = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     __table_args__ = (db.UniqueConstraint('ticker', 'period', name='_ticker_period_uc'),)
 
-class PortfolioHistory(db.Model):
+class CryptoPortfolioHistory(db.Model):
+    __tablename__ = 'crypto_portfolio_history'
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False, unique=True, index=True)
     total_value_rub = db.Column(db.Numeric(20, 2), nullable=False)

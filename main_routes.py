@@ -2,40 +2,73 @@ import os
 import json
 from datetime import datetime, date, timezone, timedelta
 from collections import namedtuple, defaultdict
-from flask import (Blueprint, render_template, request, redirect, url_for, flash, current_app)
+from flask import (Blueprint, render_template, request, redirect, url_for, flash, current_app, g, jsonify) # noqa
 from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import joinedload
-from sqlalchemy import func, asc, desc
+from sqlalchemy import func, asc, desc, or_
 from models import Debt, Account, BankingTransaction, Bank
 from extensions import db # noqa
 from models import (
     InvestmentPlatform, InvestmentAsset, Transaction, Account, Category, Debt,
-    BankingTransaction, HistoricalPriceCache, PortfolioHistory, JsonCache,
+    BankingTransaction, HistoricalPriceCache, CryptoPortfolioHistory, JsonCache,
     SecuritiesPortfolioHistory, TransactionItem,
 )
 from api_clients import (
     SYNC_DISPATCHER, SYNC_TRANSACTIONS_DISPATCHER, PRICE_TICKER_DISPATCHER,
     _convert_bybit_timestamp, fetch_bybit_spot_tickers, fetch_bitget_spot_tickers,
     fetch_bingx_spot_tickers, fetch_kucoin_spot_tickers, fetch_okx_spot_tickers,
-    fetch_cryptocompare_news
+    fetch_cryptocompare_news,
+    TRANSACTION_PROCESSOR_DISPATCHER
 )
 from analytics_logic import (
     refresh_crypto_price_change_data, refresh_crypto_portfolio_history, refresh_securities_portfolio_history,
     get_performance_chart_data_from_cache, refresh_performance_chart_data, refresh_market_leaders_cache)
 from securities_logic import fetch_moex_market_leaders, fetch_moex_securities_metadata # noqa
 from news_logic import get_crypto_news, get_securities_news
+from logic.news_analysis import get_news_trends_for_portfolio
+from logic.platform_sync_logic import sync_platform_balances, sync_platform_transactions
+
 main_bp = Blueprint('main', __name__)
 
 def _get_currency_rates():
-    """Возвращает словарь с курсами валют к рублю."""
-    # В будущем здесь может быть логика для получения курсов из API
-    return {
-        'USD': Decimal('90.0'), 
-        'EUR': Decimal('100.0'), 
-        'RUB': Decimal('1.0'), 
-        'USDT': Decimal('90.0'), 
-        None: Decimal('1.0') # Для активов без указания валюты
-    }
+    """
+    Возвращает словарь с курсами валют к рублю.
+    Пытается получить актуальный курс USDT/RUB из кэша. Если кэш пуст,
+    запрашивает курс напрямую. В случае ошибки использует значения по умолчанию.
+    """
+    if 'currency_rates' not in g:
+        # Значения по умолчанию на случай, если API или кэш недоступны
+        rates = {
+            'USD': Decimal('90.0'), 
+            'EUR': Decimal('100.0'), 
+            'RUB': Decimal('1.0'), 
+            'USDT': Decimal('90.0'), 
+            None: Decimal('1.0') # Для активов без указания валюты
+        }
+        try:
+            cache_entry = JsonCache.query.filter_by(cache_key='currency_rates').first()
+            if cache_entry and cache_entry.json_data:
+                cached_rates = json.loads(cache_entry.json_data)
+                # Обновляем курсы из кэша, конвертируя строки в Decimal
+                if 'USDT' in cached_rates:
+                    rates['USDT'] = Decimal(cached_rates['USDT'])
+                if 'USD' in cached_rates:
+                    rates['USD'] = Decimal(cached_rates['USD'])
+                current_app.logger.info(f"--- [Currency Rates] Курсы валют загружены из кэша: USDT={rates['USDT']}")
+            else:
+                # Если кэш пуст, пытаемся получить курс напрямую и создать кэш
+                current_app.logger.info("--- [Currency Rates] Кэш курсов пуст, попытка получить свежий курс...")
+                from api_clients import fetch_usdt_rub_rate # Локальный импорт для избежания циклической зависимости
+                fresh_rate = fetch_usdt_rub_rate()
+                if fresh_rate:
+                    rates['USDT'] = fresh_rate
+                    rates['USD'] = fresh_rate
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"--- [Currency Rates] Ошибка при получении курсов из кэша, используются значения по умолчанию. Ошибка: {e}")
+        
+        g.currency_rates = rates
+    return g.currency_rates
 
 def _populate_account_from_form(account: Account, form_data):
     """Вспомогательная функция для заполнения объекта Account из данных формы."""
@@ -56,7 +89,7 @@ def _populate_account_from_form(account: Account, form_data):
     if account.account_type == 'credit':
         account.credit_limit = Decimal(form_data.get('credit_limit', '0'))
         account.grace_period_days = int(form_data.get('grace_period_days', '0'))
-def _calculate_portfolio_changes(history_records: list[PortfolioHistory]) -> dict:
+def _calculate_portfolio_changes(history_records: list) -> dict:
     """Рассчитывает процентные изменения портфеля для разных периодов."""
     changes = {'1d': None, '7d': None, '30d': None, '180d': None, '365d': None}
     if not history_records:
@@ -95,22 +128,25 @@ def index():
     securities_history = SecuritiesPortfolioHistory.query.filter(SecuritiesPortfolioHistory.date >= securities_history_start_date).order_by(SecuritiesPortfolioHistory.date.asc()).all()
     securities_changes = _calculate_portfolio_changes(securities_history)
 
-    # --- 2. Сводка по крипто-портфелю ---
+    # --- 2. Сводка по крипто-портфелю --- # noqa
     crypto_assets = InvestmentAsset.query.join(InvestmentPlatform).filter(InvestmentPlatform.platform_type == 'crypto_exchange').all()
     crypto_total_usdt = sum((asset.quantity or 0) * (asset.current_price or 0) for asset in crypto_assets)
     crypto_total_rub = crypto_total_usdt * currency_rates_to_rub['USDT']
 
-    # Расчет изменений для крипто-портфеля за разные периоды
+    # Расчет изменений для крипто-портфеля за разные периоды # noqa
     start_date_query = date.today() - timedelta(days=366)
-    history = PortfolioHistory.query.filter(PortfolioHistory.date >= start_date_query).order_by(PortfolioHistory.date.asc()).all()
-    crypto_changes = _calculate_portfolio_changes(history)
+    crypto_history = CryptoPortfolioHistory.query.filter(CryptoPortfolioHistory.date >= start_date_query).order_by(CryptoPortfolioHistory.date.asc()).all()
+    crypto_changes = _calculate_portfolio_changes(crypto_history)
 
-    # --- 3. Сводка по банковским счетам ---
-    bank_accounts = Account.query.filter(Account.account_type.in_(['bank_account', 'deposit', 'bank_card'])).all()
-    banking_total_rub = sum(
-        acc.balance * currency_rates_to_rub.get(acc.currency, Decimal(1.0))
-        for acc in bank_accounts
-    )
+    # --- 3. Сводка по банковским счетам (включая кредитные карты) ---
+    bank_accounts = Account.query.filter(Account.account_type.in_(['bank_account', 'deposit', 'bank_card', 'credit'])).all()
+    banking_total_rub = Decimal(0)
+    for acc in bank_accounts:
+        value_in_rub = acc.balance * currency_rates_to_rub.get(acc.currency, Decimal(1.0))
+        if acc.account_type == 'credit':
+            banking_total_rub -= value_in_rub # Вычитаем долг по кредитке
+        else:
+            banking_total_rub += value_in_rub # Прибавляем активы
     
     # Список вкладов и накопительных счетов для отображения
     deposits_and_savings = Account.query.filter(
@@ -118,27 +154,196 @@ def index():
         Account.is_active == True
     ).order_by(Account.balance.desc()).all()
 
-    # --- 4. Общая стоимость ---
-    net_worth_rub = securities_total_rub + crypto_total_rub + banking_total_rub
+    # --- 4. Сводка по долгам ---
+    i_owe_list = Debt.query.filter_by(debt_type='i_owe', status='active').all()
+    owed_to_me_list = Debt.query.filter_by(debt_type='owed_to_me', status='active').all()
+    # TODO: Добавить конвертацию валют для долгов
+    i_owe_total_rub = sum(d.initial_amount - d.repaid_amount for d in i_owe_list)
+    owed_to_me_total_rub = sum(d.initial_amount - d.repaid_amount for d in owed_to_me_list)
 
-    # --- 5. Рыночные данные ---
-    # ИЗМЕНЕНО: Получаем данные из кэша, а не в реальном времени
-    market_leaders_cache = JsonCache.query.filter_by(cache_key='market_leaders_data').first()
-    if market_leaders_cache:
-        market_data = json.loads(market_leaders_cache.json_data)
-        moex_leaders, crypto_leaders = market_data.get('moex', []), market_data.get('crypto', [])
-    else:
-        moex_leaders, crypto_leaders = [], []
+    # --- 5. Последние операции ---
+    last_investment_txs = Transaction.query.options(joinedload(Transaction.platform)).order_by(Transaction.timestamp.desc()).limit(7).all()
+    last_banking_txs = BankingTransaction.query.options(
+        joinedload(BankingTransaction.account_ref), 
+        joinedload(BankingTransaction.to_account_ref)
+    ).order_by(BankingTransaction.date.desc()).limit(7).all()
+
+    combined_txs = []
+    for tx in last_investment_txs:
+        desc = tx.raw_type or tx.type.capitalize()
+        value_str = ""
+        if tx.type == 'buy':
+            desc = f"Покупка {tx.asset1_ticker}"
+            value_str = f"-{tx.asset2_amount:,.2f}".replace(',', ' ') + f" {tx.asset2_ticker}"
+        elif tx.type == 'sell':
+            desc = f"Продажа {tx.asset1_ticker}"
+            value_str = f"+{tx.asset2_amount:,.2f}".replace(',', ' ') + f" {tx.asset2_ticker}"
+        elif tx.type == 'deposit':
+            desc = f"Депозит {tx.asset1_ticker}"
+            value_str = f"+{tx.asset1_amount:,.4f}".replace(',', ' ').rstrip('0').rstrip('.') + f" {tx.asset1_ticker}"
+        elif tx.type == 'withdrawal':
+            desc = f"Вывод {tx.asset1_ticker}"
+            value_str = f"-{tx.asset1_amount:,.4f}".replace(',', ' ').rstrip('0').rstrip('.') + f" {tx.asset1_ticker}"
+        elif tx.type == 'transfer':
+            desc = f"Перевод {tx.asset1_ticker}"
+            value_str = f"{tx.asset1_amount:,.4f}".replace(',', ' ').rstrip('0').rstrip('.') + f" {tx.asset1_ticker}"
+        
+        combined_txs.append({
+            'timestamp': tx.timestamp,
+            'description': desc,
+            'value': value_str,
+            'source': tx.platform.name,
+            'is_investment': True,
+            'is_positive': None
+        })
+
+    for tx in last_banking_txs:
+        desc = tx.description or tx.transaction_type.capitalize()
+        value_str = ""
+        is_positive = None
+        if tx.transaction_type == 'expense':
+            value_str = f"-{tx.amount:,.2f}".replace(',', ' ') + f" {tx.account_ref.currency}"
+            is_positive = False
+        elif tx.transaction_type == 'income':
+            value_str = f"+{tx.amount:,.2f}".replace(',', ' ') + f" {tx.account_ref.currency}"
+            is_positive = True
+        elif tx.transaction_type == 'transfer':
+            desc = f"Перевод на {tx.to_account_ref.name}"
+            value_str = f"-{tx.amount:,.2f}".replace(',', ' ') + f" {tx.account_ref.currency}"
+            is_positive = False
+        elif tx.transaction_type == 'exchange':
+            desc = f"Обмен {tx.account_ref.currency} -> {tx.to_account_ref.currency}"
+            value_str = f"+{tx.to_amount:,.2f}".replace(',', ' ') + f" {tx.to_account_ref.currency}"
+            is_positive = True
+        
+        combined_txs.append({
+            'timestamp': tx.date,
+            'description': desc,
+            'value': value_str,
+            'source': tx.account_ref.name,
+            'is_investment': False,
+            'is_positive': is_positive
+        })
+
+    combined_txs.sort(key=lambda x: x['timestamp'], reverse=True)
+    last_10_transactions = combined_txs[:10]
+
+    # --- 5.1 Последние операции по ЦБ ---
+    last_securities_txs_raw = Transaction.query.join(InvestmentPlatform).filter(
+        InvestmentPlatform.platform_type == 'stock_broker'
+    ).options(joinedload(Transaction.platform)).order_by(Transaction.timestamp.desc()).limit(10).all()
+
+    last_securities_txs = []
+    for tx in last_securities_txs_raw:
+        desc = tx.raw_type or tx.type.capitalize()
+        value_str = ""
+        is_positive = None
+        if tx.type == 'buy':
+            desc = f"Покупка {tx.asset1_ticker}"
+            value_str = f"-{tx.asset2_amount:,.2f}".replace(',', ' ') + f" {tx.asset2_ticker}"
+            is_positive = False
+        elif tx.type == 'sell':
+            desc = f"Продажа {tx.asset1_ticker}"
+            value_str = f"+{tx.asset2_amount:,.2f}".replace(',', ' ') + f" {tx.asset2_ticker}"
+            is_positive = True
+        
+        last_securities_txs.append({
+            'timestamp': tx.timestamp, 'description': desc, 'value': value_str,
+            'source': tx.platform.name, 'is_positive': is_positive
+        })
+
+    # --- 6. Общая стоимость ---
+    net_worth_rub = securities_total_rub + crypto_total_rub + banking_total_rub + owed_to_me_total_rub - i_owe_total_rub
+
+    # --- 7. Топ-5 активов по стоимости ---
+    # --- Top 5 Securities ---
+    securities_valued_assets = []
+    for asset in securities_assets:
+        value_rub = (asset.quantity or 0) * (asset.current_price or 0) * currency_rates_to_rub.get(asset.currency_of_price, Decimal(1.0))
+        securities_valued_assets.append({'asset': asset, 'value_rub': value_rub})
+
+    top_5_securities_sorted = sorted(securities_valued_assets, key=lambda x: x['value_rub'], reverse=True)[:5]
+    top_securities_isins = [item['asset'].ticker for item in top_5_securities_sorted]
+
+    securities_price_changes_raw = db.session.query(
+        HistoricalPriceCache.ticker, 
+        HistoricalPriceCache.period, 
+        HistoricalPriceCache.change_percent
+    ).filter(
+        HistoricalPriceCache.ticker.in_(top_securities_isins),
+        HistoricalPriceCache.period.in_(['1d', '7d', '30d'])
+    ).all()
+
+    securities_changes_by_isin = defaultdict(dict)
+    for isin, period, change in securities_price_changes_raw:
+        securities_changes_by_isin[isin][period] = change
+
+    top_5_securities = []
+    for item in top_5_securities_sorted:
+        isin = item['asset'].ticker
+        item['changes'] = securities_changes_by_isin.get(isin, {})
+        top_5_securities.append(item)
+
+    # --- Top 5 Crypto ---
+    # ИЗМЕНЕНО: Логика определения топ-5 криптоактивов.
+    # Теперь активы сначала агрегируются по тикеру со всех платформ, а затем сортируются.
+    aggregated_crypto_assets = defaultdict(lambda: {
+        'total_quantity': Decimal(0),
+        'total_value_rub': Decimal(0),
+        'name': ''
+    })
+
+    for asset in crypto_assets: # crypto_assets уже получен ранее
+        ticker = asset.ticker
+        quantity = asset.quantity or Decimal(0)
+        price = asset.current_price or Decimal(0)
+        
+        asset_value_usdt = quantity * price
+        asset_value_rub = asset_value_usdt * currency_rates_to_rub.get('USDT', Decimal(1.0))
+
+        agg = aggregated_crypto_assets[ticker]
+        agg['total_quantity'] += quantity
+        agg['total_value_rub'] += asset_value_rub
+        agg['name'] = asset.name # Имя будет одинаковым для одного тикера
+
+    top_5_crypto_sorted = sorted(aggregated_crypto_assets.items(), key=lambda item: item[1]['total_value_rub'], reverse=True)[:5]
+    top_crypto_tickers = [ticker for ticker, data in top_5_crypto_sorted]
+
+    crypto_price_changes_raw = db.session.query(
+        HistoricalPriceCache.ticker, 
+        HistoricalPriceCache.period, 
+        HistoricalPriceCache.change_percent
+    ).filter(
+        HistoricalPriceCache.ticker.in_(top_crypto_tickers),
+        HistoricalPriceCache.period.in_(['24h', '7d', '30d'])
+    ).all()
+
+    crypto_changes_by_ticker = defaultdict(dict)
+    for ticker, period, change in crypto_price_changes_raw:
+        period_key = '1d' if period == '24h' else period
+        crypto_changes_by_ticker[ticker][period_key] = change
+
+    top_5_crypto = []
+    for ticker, data in top_5_crypto_sorted:
+        top_5_crypto.append({
+            'ticker': ticker,
+            'name': data['name'],
+            'value_rub': data['total_value_rub'],
+            'changes': crypto_changes_by_ticker.get(ticker, {})
+        })
 
     return render_template(
         'index.html',
         net_worth_rub=net_worth_rub,
-        securities_summary={'total_rub': securities_total_rub, 'changes': securities_changes},
+        securities_summary={'total_rub': securities_total_rub, 'changes': securities_changes}, # noqa
         crypto_summary={'total_rub': crypto_total_rub, 'changes': crypto_changes},
         banking_summary={'total_rub': banking_total_rub},
+        debt_summary={'i_owe': i_owe_total_rub, 'owed_to_me': owed_to_me_total_rub},
+        last_transactions=last_10_transactions,
+        last_securities_txs=last_securities_txs,
         deposits_and_savings=deposits_and_savings,
-        moex_leaders=moex_leaders,
-        crypto_leaders=crypto_leaders
+        top_5_securities=top_5_securities,
+        top_5_crypto=top_5_crypto
     )
 
 @main_bp.route('/platforms')
@@ -210,40 +415,39 @@ def ui_investment_platform_detail(platform_id):
         flash('Ошибка чтения ручных Earn балансов (неверный JSON). Пожалуйста, исправьте.', 'danger')
         manual_earn_balances = {}
 
+    # ОПТИМИЗАЦИЯ: Сначала собираем все тикеры, затем делаем один запрос на получение цен.
+    manual_tickers_to_fetch = [t for t, q_str in manual_earn_balances.items() if Decimal(q_str) > 0 and t.upper() not in ['USDT', 'USDC', 'DAI']]
+    manual_prices = {}
+    price_fetcher_config = PRICE_TICKER_DISPATCHER.get(platform.name.lower())
+    if price_fetcher_config and manual_tickers_to_fetch:
+        try:
+            symbols_for_api = [f"{ticker}{price_fetcher_config['suffix']}" for ticker in manual_tickers_to_fetch]
+            ticker_data_list = price_fetcher_config['func'](target_symbols=symbols_for_api)
+            for item in ticker_data_list:
+                manual_prices[item['ticker']] = Decimal(item['price'])
+        except Exception as e:
+            current_app.logger.error(f"Ошибка получения цен для ручных Earn балансов: {e}")
+
     for ticker, quantity_str in manual_earn_balances.items():
         try:
             quantity = Decimal(quantity_str)
-            if quantity <= 0:
-                continue
+            if quantity <= 0: continue
 
-            current_price = None
             currency_of_price = 'USDT'
+            current_price = manual_prices.get(ticker)
 
-            price_fetcher_config = PRICE_TICKER_DISPATCHER.get(platform.name.lower())
-            if price_fetcher_config:
-                api_symbol = f"{ticker}{price_fetcher_config['suffix']}"
-                try:
-                    ticker_data_list = price_fetcher_config['func'](target_symbols=[api_symbol])
-                    if ticker_data_list:
-                        current_price = Decimal(ticker_data_list[0]['price'])
-                except Exception as e:
-                    print(f"Ошибка получения цены для {ticker} (ручной Earn): {e}")
-            
-            if current_price is None:
-                if ticker.upper() in ['USDT', 'USDC', 'DAI']:
-                    current_price = Decimal('1.0')
-                else:
-                    current_price = Decimal('0.0')
+            if current_price is None: # Если цена не была получена
+                current_price = Decimal('1.0') if ticker.upper() in ['USDT', 'USDC', 'DAI'] else Decimal('0.0')
 
             asset_value_usdt = quantity * (current_price or Decimal(0))
             platform_total_value_usdt += asset_value_usdt
-
             asset_value_rub = asset_value_usdt * currency_rates_to_rub.get(currency_of_price, Decimal(1.0))
             platform_total_value_rub += asset_value_rub
             
             account_type_summary['Manual Earn']['rub'] += asset_value_rub
             account_type_summary['Manual Earn']['usdt'] += asset_value_usdt
 
+            # Создаем временный объект для отображения в шаблоне
             DummyAsset = namedtuple('InvestmentAsset', ['ticker', 'name', 'quantity', 'current_price', 'currency_of_price', 'source_account_type', 'id'])
             all_valued_assets.append({
                 'asset': DummyAsset(
@@ -351,422 +555,24 @@ def _get_sync_function(platform_name: str, dispatcher: dict):
 
 @main_bp.route('/platforms/<int:platform_id>/sync', methods=['POST'])
 def ui_sync_investment_platform(platform_id):
+    """Запускает синхронизацию балансов для платформы, используя централизованную логику."""
     platform = InvestmentPlatform.query.get_or_404(platform_id)
-    sync_function = _get_sync_function(platform.name, SYNC_DISPATCHER)
-
-    if not sync_function:
-        flash(f'Синхронизация для платформы "{platform.name}" еще не реализована.', 'warning')
-        return redirect(request.referrer or url_for('main.ui_investment_platform_detail', platform_id=platform.id))
-
-    try:
-        api_key = platform.api_key
-        api_secret = platform.api_secret # Используем геттер, который расшифрует
-        passphrase = platform.passphrase # Используем геттер, который расшифрует
-
-        fetched_assets_data = sync_function(api_key=api_key, api_secret=api_secret, passphrase=passphrase)
-        
-        prices_by_ticker = {}
-        price_fetcher_config = PRICE_TICKER_DISPATCHER.get(platform.name.lower())
-        if price_fetcher_config:
-            db_tickers = {asset.ticker for asset in platform.assets if asset.asset_type == 'crypto'}
-            api_tickers = {asset_data['ticker'] for asset_data in fetched_assets_data}
-            all_tickers_to_price = db_tickers.union(api_tickers)
-            tickers_to_fetch = [t for t in all_tickers_to_price if t.upper() not in ['USDT', 'USDC', 'DAI']]
-            symbols_for_api = [f"{ticker}{price_fetcher_config['suffix']}" for ticker in tickers_to_fetch]
-
-            if symbols_for_api:
-                price_data = price_fetcher_config['func'](target_symbols=symbols_for_api)
-                for item in price_data:
-                    # ИСПРАВЛЕНО: Используем правильный ключ 'ticker', который уже очищен
-                    ticker = item['ticker']
-                    prices_by_ticker[ticker] = Decimal(item['price'])
-
-        existing_db_assets = {(asset.ticker, asset.source_account_type): asset for asset in platform.assets}
-        updated_count, added_count, removed_count = 0, 0, 0
-
-        for asset_data in fetched_assets_data:
-            ticker = asset_data['ticker']
-            quantity = Decimal(asset_data['quantity'])
-            account_type = asset_data.get('account_type', 'Spot')
-            current_price = prices_by_ticker.get(ticker)
-            if ticker.upper() in ['USDT', 'USDC', 'DAI']:
-                current_price = Decimal('1.0')
-            composite_key = (ticker, account_type)
-
-            if composite_key in existing_db_assets:
-                db_asset = existing_db_assets.pop(composite_key)
-                if db_asset.quantity != quantity or db_asset.current_price != current_price or db_asset.currency_of_price != 'USDT':
-                    db_asset.quantity = quantity
-                    db_asset.current_price = current_price
-                    db_asset.currency_of_price = 'USDT'
-                    updated_count += 1
-            else:
-                new_asset = InvestmentAsset(
-                    ticker=ticker, name=ticker, asset_type='crypto', quantity=quantity,
-                    current_price=current_price, currency_of_price='USDT',
-                    platform_id=platform.id, source_account_type=account_type
-                )
-                db.session.add(new_asset)
-                added_count += 1
-        
-        manual_account_types_to_preserve = ['Manual', 'Manual Earn', 'Staking', 'Lending']
-        for composite_key, db_asset in existing_db_assets.items():
-            if db_asset.source_account_type not in manual_account_types_to_preserve:
-                if db_asset.quantity != 0:
-                    db_asset.quantity = Decimal(0)
-                    removed_count += 1
-            else:
-                new_price = prices_by_ticker.get(db_asset.ticker)
-                if new_price is not None and db_asset.current_price != new_price:
-                    db_asset.current_price = new_price
-                    db_asset.currency_of_price = 'USDT'
-                    updated_count += 1
-
-        platform.last_sync_status = f"Success: {added_count} added, {updated_count} updated, {removed_count} zeroed."
-        platform.last_synced_at = datetime.now(timezone.utc)
-        db.session.commit()
-        flash(f'Синхронизация для "{platform.name}" прошла успешно. Добавлено: {added_count}, Обновлено: {updated_count}, Обнулено: {removed_count}.', 'success')
-
-    except Exception as e:
-        import traceback
-        current_app.logger.error(f"Полная ошибка при синхронизации балансов для '{platform.name}':")
-        current_app.logger.error(traceback.format_exc())
-        db.session.rollback()
-        platform.last_sync_status = f"Error: {e}"
-        platform.last_synced_at = datetime.now(timezone.utc)
-        db.session.commit()
-        # УЛУЧШЕНО: Показываем более информативное сообщение об ошибке в интерфейсе
-        flash(f'Ошибка при синхронизации "{platform.name}": {type(e).__name__} - {e}', 'danger')
+    success, message = sync_platform_balances(platform)
+    if success:
+        flash(f'Синхронизация балансов для "{platform.name}" завершена. {message}', 'success')
+    else:
+        flash(f'Ошибка при синхронизации балансов для "{platform.name}": {message}', 'danger')
     return redirect(request.referrer or url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
 @main_bp.route('/platforms/<int:platform_id>/sync_transactions', methods=['POST'])
 def ui_sync_investment_platform_transactions(platform_id):
+    """Запускает синхронизацию транзакций для платформы, используя централизованную логику."""
     platform = InvestmentPlatform.query.get_or_404(platform_id)
-    sync_function = _get_sync_function(platform.name, SYNC_TRANSACTIONS_DISPATCHER)
-
-    if not sync_function:
-        current_app.logger.warning(f"Функция синхронизации транзакций не найдена для платформы '{platform.name}'. Проверьте название.")
-        flash(f'Синхронизация транзакций для платформы "{platform.name}" еще не реализована.', 'warning')
-        return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
-
-    try:
-        api_key, api_secret, passphrase = platform.api_key, platform.api_secret, platform.passphrase
-        end_time_dt = datetime.now(timezone.utc)
-        
-        # ИСПРАВЛЕНО: Добавляем "буфер" в 1 день, чтобы перепроверить транзакции,
-        # которые могли быть в статусе "pending" во время прошлой синхронизации.
-        buffer_timedelta = timedelta(days=1)
-        last_sync = platform.last_tx_synced_at
-
-        # ИСПРАВЛЕНО: Преобразуем "наивное" время из БД в "осознанное" (aware)
-        # время с часовым поясом UTC, чтобы избежать ошибок сравнения.
-        if last_sync and last_sync.tzinfo is None:
-            last_sync = last_sync.replace(tzinfo=timezone.utc)
-            
-        start_time_dt = (last_sync - buffer_timedelta) if last_sync else (end_time_dt - timedelta(days=2*365))
-
-        fetched_data = sync_function(api_key=api_key, api_secret=api_secret, passphrase=passphrase, start_time_dt=start_time_dt, end_time_dt=end_time_dt)
-        existing_tx_ids = {tx.exchange_tx_id for tx in platform.transactions}
-        added_count = 0
-        platform_name = platform.name.lower()
-
-        # ... (The giant if/elif block for processing transactions remains the same)
-        if platform_name == 'bybit':
-            for t in fetched_data.get('transfers', []):
-                prefixed_id = f"bybit_transfer_{t['transferId']}"
-                if prefixed_id not in existing_tx_ids:
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(t['timestamp']), type='transfer', raw_type=f"{t['fromAccountType']} -> {t['toAccountType']}", asset1_ticker=t['coin'], asset1_amount=Decimal(t['amount']), platform_id=platform.id, description=f"Internal transfer on {platform.name}"))
-                    added_count += 1
-            for d in fetched_data.get('internal_deposits', []):
-                prefixed_id = f"bybit_internal_deposit_{d['id']}"
-                if prefixed_id not in existing_tx_ids and d.get('status') in [1, 2]:
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['createdTime']), type='deposit', raw_type='Internal Deposit', asset1_ticker=d['coin'], asset1_amount=Decimal(d['amount']), platform_id=platform.id, description=f"Internal deposit of {d['coin']}"))
-                    added_count += 1
-            for d in fetched_data.get('deposits', []):
-                prefixed_id = f"bybit_deposit_{d['txID']}"
-                if prefixed_id not in existing_tx_ids and d.get('status') == 1:
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['successAt']), type='deposit', raw_type=f"Deposit via {d['chain']}", asset1_ticker=d['coin'], asset1_amount=Decimal(d['amount']), platform_id=platform.id, description=f"Deposit of {d['coin']}"))
-                    added_count += 1
-            for w in fetched_data.get('withdrawals', []):
-                prefixed_id = f"bybit_withdrawal_{w['txID']}"
-                # ИСПРАВЛЕНО: Статус успешного вывода для Bybit API v5 - это '2'.
-                # Раньше было [1, 4], что неверно (Pending, Reject).
-                if prefixed_id not in existing_tx_ids and w.get('status') == 2:
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(w['updateAt']), type='withdrawal', raw_type=f"Withdrawal ({w.get('withdrawType', 'N/A')})", asset1_ticker=w['coin'], asset1_amount=Decimal(w['amount']), fee_amount=Decimal(w.get('fee', '0')), fee_currency=w['coin'], platform_id=platform.id, description=f"Withdrawal of {w['coin']} to {w.get('toAddress', 'N/A')}"))
-                    added_count += 1
-            for trade in fetched_data.get('trades', []):
-                prefixed_id = f"bybit_trade_{trade['execId']}"
-                if prefixed_id not in existing_tx_ids:
-                    # ИСПРАВЛЕНО: Добавлена надежная логика разбора торговой пары.
-                    # Раньше корректно обрабатывались только пары к USDT и USDC.
-                    symbol = trade.get('symbol')
-                    known_quotes = ['USDT', 'USDC', 'BTC', 'ETH', 'BUSD', 'TUSD', 'DAI']
-                    base_coin, quote_coin = None, None
-                    if symbol:
-                        for quote in known_quotes:
-                            if symbol.endswith(quote):
-                                base_coin = symbol[:-len(quote)]
-                                quote_coin = quote
-                                break
-                    if not base_coin:
-                        current_app.logger.warning(f"Не удалось определить валюты для торговой пары Bybit: {symbol}. Пропуск транзакции.")
-                        continue
-                    asset1_amount, asset2_amount = Decimal(trade.get('execQty', '0')), Decimal(trade.get('execValue', '0'))
-                    # ИСПРАВЛЕНО: Используем цену исполнения 'execPrice' напрямую из ответа API.
-                    # Это безопаснее, чем вычислять ее вручную (asset2_amount / asset1_amount),
-                    # так как избегает потенциальной ошибки деления на ноль, если execQty равен 0.                    
-                    execution_price = Decimal(trade.get('execPrice', '0'))
-                    # ИСПРАВЛЕНО: Валюта комиссии определяется полем 'feeTokenId' для точности.
-                    fee_currency = trade.get('feeTokenId', base_coin if trade['side'].lower() == 'buy' else quote_coin)
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['execTime']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=execution_price, fee_amount=Decimal(trade.get('execFee', '0')), fee_currency=fee_currency, platform_id=platform.id, description=f"Spot {trade['side'].lower()} {asset1_amount} {base_coin}"))
-                    added_count += 1
-        elif platform_name == 'bitget':
-            for d in fetched_data.get('deposits', []):
-                prefixed_id = f"bitget_deposit_{d['id']}"
-                if prefixed_id not in existing_tx_ids and d.get('status') == 'success':
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['cTime']), type='deposit', raw_type='Deposit', asset1_ticker=d['coin'], asset1_amount=Decimal(d['amount']), platform_id=platform.id))
-                    added_count += 1
-            for w in fetched_data.get('withdrawals', []):
-                prefixed_id = f"bitget_withdrawal_{w['withdrawId']}"
-                if prefixed_id not in existing_tx_ids and w.get('status') == 'success':
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(w['cTime']), type='withdrawal', raw_type='Withdrawal', asset1_ticker=w['coin'], asset1_amount=Decimal(w['amount']), fee_amount=Decimal(w.get('fee', '0')), fee_currency=w['coin'], platform_id=platform.id))
-                    added_count += 1
-            for trade in fetched_data.get('trades', []):
-                prefixed_id = f"bitget_trade_{trade['tradeId']}"
-                if prefixed_id not in existing_tx_ids:
-                    symbol = trade.get('symbol')
-                    if not symbol:
-                        continue
-
-                    known_quotes = ['USDT', 'USDC', 'BTC', 'ETH', 'BUSD', 'TUSD', 'DAI']
-                    base_coin, quote_coin = None, None
-                    for quote in known_quotes:
-                        if symbol.endswith(quote):
-                            base_coin = symbol[:-len(quote)]
-                            quote_coin = quote
-                            break
-                    
-                    if not base_coin:
-                        current_app.logger.warning(f"Не удалось определить котируемую валюту для символа Bitget: {symbol}. Пропуск транзакции.")
-                        continue
-
-                    # ИСПРАВЛЕНО: Используем правильные ключи для эндпоинта /api/v2/spot/trade/fills.
-                    # 'size' - количество в базовой валюте, 'amount' - количество в котируемой валюте, 'price' - цена.
-                    asset1_amount = Decimal(trade.get('size', '0'))
-                    asset2_amount = Decimal(trade.get('amount', '0'))
-                    execution_price = Decimal(trade.get('price', '0'))
-
-                    # УЛУЧШЕНО: Если цена исполнения не предоставлена или равна нулю,
-                    # рассчитываем ее вручную, чтобы избежать нулевых цен для рыночных ордеров.
-                    if execution_price == 0 and asset1_amount > 0 and asset2_amount > 0:
-                        execution_price = asset2_amount / asset1_amount
-                    
-                    # УЛУЧШЕНО: Более надежная обработка комиссии, которая может приходить
-                    # как JSON-строка или уже как готовый список, что предотвращает ошибки.
-                    fee_amount = Decimal('0')
-                    fee_currency = quote_coin # Резервный вариант
-                    fee_detail_value = trade.get('feeDetail')
-                    fee_details_list = None
-
-                    if isinstance(fee_detail_value, str) and fee_detail_value:
-                        try:
-                            fee_details_list = json.loads(fee_detail_value)
-                        except json.JSONDecodeError:
-                            current_app.logger.warning(f"Не удалось разобрать JSON из feeDetail для Bitget: {fee_detail_value}")
-                    elif isinstance(fee_detail_value, list):
-                        fee_details_list = fee_detail_value
-
-                    if fee_details_list and isinstance(fee_details_list, list) and len(fee_details_list) > 0:
-                        fee_details = fee_details_list[0]
-                        if isinstance(fee_details, dict):
-                            fee_amount = Decimal(fee_details.get('fee', '0'))
-                            fee_currency = fee_details.get('feeCoin', fee_currency)
-
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id, 
-                        timestamp=_convert_bybit_timestamp(trade['cTime']), 
-                        type=trade['side'].lower(), 
-                        raw_type=f"Spot Trade ({trade['side'].upper()})", 
-                        asset1_ticker=base_coin, 
-                        asset1_amount=asset1_amount, 
-                        asset2_ticker=quote_coin, 
-                        asset2_amount=asset2_amount, 
-                        execution_price=execution_price, 
-                        fee_amount=fee_amount, 
-                        fee_currency=fee_currency, 
-                        platform_id=platform.id
-                    ))
-                    added_count += 1
-            for t in fetched_data.get('transfers', []):
-                prefixed_id = f"bitget_transfer_{t['id']}"
-                if prefixed_id not in existing_tx_ids and t.get('status') == 'success':
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id,
-                        timestamp=_convert_bybit_timestamp(t['cTime']),
-                        type='transfer',
-                        raw_type=f"{t.get('fromType', 'N/A')} -> {t.get('toType', 'N/A')}",
-                        asset1_ticker=t['coin'],
-                        asset1_amount=Decimal(t['amount']),
-                        platform_id=platform.id,
-                        description=f"Internal transfer on {platform.name}"
-                    ))
-                    added_count += 1
-        elif platform_name == 'bingx':
-            for d in fetched_data.get('deposits', []):
-                # ИСПРАВЛЕНО: Статус успешного депозита для BingX - это 1 (число), а не 'success' (строка).
-                if d.get('status') == 1:
-                    prefixed_id = f"bingx_deposit_{d['id']}"
-                    if prefixed_id not in existing_tx_ids:
-                        db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(d['insertTime']), type='deposit', raw_type='Deposit', asset1_ticker=d['asset'], asset1_amount=Decimal(d['amount']), platform_id=platform.id))
-                        added_count += 1
-            for w in fetched_data.get('withdrawals', []):
-                # ИСПРАВЛЕНО: Статус успешного вывода для BingX - это 1 (число), а не 'success' (строка).
-                if w.get('status') == 1:
-                    prefixed_id = f"bingx_withdrawal_{w['id']}"
-                    if prefixed_id not in existing_tx_ids:
-                        db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(w['applyTime']), type='withdrawal', raw_type='Withdrawal', asset1_ticker=w['asset'], asset1_amount=Decimal(w['amount']), fee_amount=Decimal(w.get('fee', '0')), fee_currency=w['asset'], platform_id=platform.id))
-                        added_count += 1
-            for trade in fetched_data.get('trades', []):
-                prefixed_id = f"bingx_trade_{trade['id']}"
-                if prefixed_id not in existing_tx_ids:
-                    base_coin, quote_coin = trade['symbol'].split('-')
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['time']), type='buy' if trade['side'] == 'BUY' else 'sell', raw_type=f"Spot Trade ({trade['side']})", asset1_ticker=base_coin, asset1_amount=Decimal(trade['qty']), asset2_ticker=quote_coin, asset2_amount=Decimal(trade['quoteQty']), execution_price=Decimal(trade['price']), fee_amount=Decimal(trade.get('commission', '0')), fee_currency=trade.get('commissionAsset'), platform_id=platform.id))
-                    added_count += 1
-        elif platform_name == 'kucoin':
-            # Deposits
-            for d in fetched_data.get('deposits', []):
-                # Используем walletTxId, так как он уникален для транзакции в блокчейне
-                prefixed_id = f"kucoin_deposit_{d['walletTxId']}"
-                if prefixed_id not in existing_tx_ids and d.get('status') == 'SUCCESS':
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id,
-                        timestamp=_convert_bybit_timestamp(d['createdAt']),
-                        type='deposit',
-                        raw_type=f"Deposit (inner: {d.get('isInner', False)})",
-                        asset1_ticker=d['currency'],
-                        asset1_amount=Decimal(d['amount']),
-                        platform_id=platform.id
-                    ))
-                    added_count += 1
-            # Withdrawals
-            for w in fetched_data.get('withdrawals', []):
-                # Используем внутренний id, так как он всегда есть
-                prefixed_id = f"kucoin_withdrawal_{w['id']}"
-                if prefixed_id not in existing_tx_ids and w.get('status') == 'SUCCESS':
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id,
-                        timestamp=_convert_bybit_timestamp(w['createdAt']),
-                        type='withdrawal',
-                        raw_type='Withdrawal',
-                        asset1_ticker=w['currency'],
-                        asset1_amount=Decimal(w['amount']),
-                        fee_amount=Decimal(w.get('fee', '0')),
-                        fee_currency=w['currency'],
-                        platform_id=platform.id
-                    ))
-                    added_count += 1
-            # Trades (Fills)
-            for trade in fetched_data.get('trades', []):
-                prefixed_id = f"kucoin_trade_{trade['tradeId']}"
-                if prefixed_id not in existing_tx_ids:
-                    base_coin, quote_coin = trade['symbol'].split('-')
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id,
-                        timestamp=_convert_bybit_timestamp(trade['createdAt']),
-                        type=trade['side'].lower(),
-                        raw_type=f"Spot Trade ({trade['side'].upper()})",
-                        asset1_ticker=base_coin,
-                        asset1_amount=Decimal(trade['size']),
-                        asset2_ticker=quote_coin,
-                        asset2_amount=Decimal(trade['funds']),
-                        execution_price=Decimal(trade['price']),
-                        fee_amount=Decimal(trade.get('fee', '0')),
-                        fee_currency=trade.get('feeCurrency'),
-                        platform_id=platform.id
-                    ))
-                    added_count += 1
-            # Transfers (from Ledgers)
-            # Мы обрабатываем только 'OUT' записи, чтобы избежать дублирования,
-            # так как каждый перевод создает 'IN' и 'OUT' запись с одинаковым orderId.
-            for t in fetched_data.get('transfers', []):
-                if t.get('direction', '').upper() != 'OUT':
-                    continue
-                
-                context = json.loads(t.get('context', '{}'))
-                order_id = context.get('orderId')
-                if not order_id:
-                    continue
-
-                prefixed_id = f"kucoin_transfer_{order_id}"
-                if prefixed_id not in existing_tx_ids:
-                    db.session.add(Transaction(
-                        exchange_tx_id=prefixed_id,
-                        timestamp=_convert_bybit_timestamp(t['createdAt']),
-                        type='transfer',
-                        raw_type=f"Transfer from {t.get('accountType', 'N/A')}",
-                        asset1_ticker=t['currency'],
-                        asset1_amount=Decimal(t['amount']),
-                        platform_id=platform.id,
-                        description=f"Internal transfer on {platform.name}"
-                    ))
-                    added_count += 1
-        elif platform_name == 'okx':
-            # Deposits
-            for d in fetched_data.get('deposits', []):
-                # state '2' means deposit credited
-                if d.get('state') == '2':
-                    prefixed_id = f"okx_deposit_{d['depId']}"
-                    if prefixed_id not in existing_tx_ids:
-                        db.session.add(Transaction(
-                            exchange_tx_id=prefixed_id,
-                            timestamp=_convert_bybit_timestamp(d['ts']),
-                            type='deposit',
-                            raw_type='Deposit',
-                            asset1_ticker=d['ccy'],
-                            asset1_amount=Decimal(d['amt']),
-                            platform_id=platform.id
-                        ))
-                        added_count += 1
-            # Withdrawals
-            for w in fetched_data.get('withdrawals', []):
-                # state '2' means withdrawal complete
-                if w.get('state') == '2':
-                    prefixed_id = f"okx_withdrawal_{w['wdId']}"
-                    if prefixed_id not in existing_tx_ids:
-                        db.session.add(Transaction(
-                            exchange_tx_id=prefixed_id,
-                            timestamp=_convert_bybit_timestamp(w['ts']),
-                            type='withdrawal',
-                            raw_type='Withdrawal',
-                            asset1_ticker=w['ccy'],
-                            asset1_amount=Decimal(w['amt']),
-                            fee_amount=Decimal(w.get('fee', '0')),
-                            fee_currency=w['ccy'], # Fee is usually in the same currency for withdrawals
-                            platform_id=platform.id
-                        ))
-                        added_count += 1
-            # Trades
-            for trade in fetched_data.get('trades', []):
-                prefixed_id = f"okx_trade_{trade['tradeId']}"
-                if prefixed_id not in existing_tx_ids:
-                    base_coin, quote_coin = trade['instId'].split('-')
-                    asset1_amount = Decimal(trade['fillSz'])
-                    asset2_amount = asset1_amount * Decimal(trade['fillPx']) # OKX doesn't provide quote quantity, calculate it
-                    db.session.add(Transaction(exchange_tx_id=prefixed_id, timestamp=_convert_bybit_timestamp(trade['ts']), type=trade['side'].lower(), raw_type=f"Spot Trade ({trade['side'].upper()})", asset1_ticker=base_coin, asset1_amount=asset1_amount, asset2_ticker=quote_coin, asset2_amount=asset2_amount, execution_price=Decimal(trade['fillPx']), fee_amount=Decimal(trade.get('fee', '0')), fee_currency=trade.get('feeCcy'), platform_id=platform.id))
-                    added_count += 1
-
-        platform.last_tx_synced_at = end_time_dt
-        db.session.commit()
-        flash(f'Синхронизация транзакций для "{platform.name}" завершена. Найдено новых: {added_count}.', 'success')
-
-    except Exception as e:
-        # УЛУЧШЕНО: Добавляем детальное логирование для отладки.
-        import traceback
-        current_app.logger.error(f"Полная ошибка при синхронизации транзакций для '{platform.name}':")
-        current_app.logger.error(traceback.format_exc())
-        db.session.rollback()
-        flash(f'Ошибка при синхронизации транзакций для "{platform.name}": {type(e).__name__} - {e}', 'danger')
-
+    success, message = sync_platform_transactions(platform)
+    if success:
+        flash(f'Синхронизация транзакций для "{platform.name}" завершена. {message}', 'success')
+    else:
+        flash(f'Ошибка при синхронизации транзакций для "{platform.name}": {message}', 'danger')
     return redirect(url_for('main.ui_investment_platform_detail', platform_id=platform.id))
 
 @main_bp.route('/platforms/<int:platform_id>/delete', methods=['POST'])
@@ -819,7 +625,7 @@ def ui_add_investment_asset_form(platform_id):
                 if ticker.upper() in ['USDT', 'USDC', 'DAI']:
                     current_price = Decimal('1.0')
                 else:
-                    price_fetcher_config = PRICE_TICKER_DISPATCHER.get(platform.name.lower())
+                    price_fetcher_config = _get_sync_function(platform.name, PRICE_TICKER_DISPATCHER)
                     if price_fetcher_config:
                         try:
                             api_symbol = f"{ticker}{price_fetcher_config['suffix']}"
@@ -961,30 +767,25 @@ def ui_add_exchange_transaction_form(platform_id):
 
 @main_bp.route('/crypto-news')
 def ui_crypto_news():
-    """Отображает страницу с последними криптовалютными новостями."""
-    # Получаем выбранную категорию из GET-параметров
-    selected_category = request.args.get('category', 'ALL')
+    """Отображает страницу с новостями и анализом трендов."""
+    # Получаем анализ трендов для топ-10 активов портфеля
+    news_trends, top_10_tickers = get_news_trends_for_portfolio()
 
-    # Определяем список доступных категорий для фильтра
-    available_categories = [
-        'ALL', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'TON', 'Technology', 
-        'Blockchain', 'Regulation', 'Mining', 'Exchange', 'Altcoin'
-    ]
-
+    # Получаем общий список последних новостей
     try:
-        # Передаем категорию в функцию, если она не 'ALL'
-        # ИЗМЕНЕНО: Используем новую функцию, которая кэширует и переводит новости.
-        news_articles = get_crypto_news(
-            limit=50, 
-            categories=selected_category if selected_category != 'ALL' else None
-        )
+        # Загружаем последние 30 новостей без фильтра по категориям
+        latest_news = get_crypto_news(limit=30)
     except Exception as e:
-        current_app.logger.error(f"Не удалось загрузить новости: {e}")
-        flash("Не удалось загрузить новости. Попробуйте позже.", "danger")
-        news_articles = []
-    
-    return render_template('crypto_news.html', news_articles=news_articles, 
-                           available_categories=available_categories, selected_category=selected_category)
+        current_app.logger.error(f"Не удалось загрузить общие новости: {e}")
+        latest_news = []
+        flash('Не удалось загрузить последние новости.', 'danger')
+
+    return render_template(
+        'crypto_news.html',
+        latest_news=latest_news,
+        news_trends=news_trends,
+        top_10_tickers=top_10_tickers
+    )
 
 @main_bp.route('/securities-news')
 def ui_securities_news():
@@ -1009,7 +810,11 @@ def ui_accounts():
 
 @main_bp.route('/crypto-assets')
 def ui_crypto_assets():
-    all_crypto_assets = InvestmentAsset.query.filter(InvestmentAsset.asset_type == 'crypto', InvestmentAsset.quantity > 0).all()
+    # ИСПРАВЛЕНО: Добавляем joinedload для жадной загрузки связанных платформ.
+    # Это решает ошибку DetachedInstanceError, когда сессия закрывается до того,
+    # как происходит ленивая загрузка `asset.platform`.
+    all_crypto_assets = InvestmentAsset.query.options(joinedload(InvestmentAsset.platform)).filter(
+        InvestmentAsset.asset_type == 'crypto', InvestmentAsset.quantity > 0).all()
     currency_rates_to_rub = _get_currency_rates()
 
     if not all_crypto_assets:
@@ -1097,37 +902,108 @@ def ui_crypto_assets():
     chart_data = [float(item[1]['total_value_rub']) for item in final_assets_list]
 
     # 2. Исторический график стоимости портфеля
-    history_data = PortfolioHistory.query.order_by(PortfolioHistory.date.asc()).all()
+    history_data = CryptoPortfolioHistory.query.order_by(CryptoPortfolioHistory.date.asc()).all()
     chart_history_labels = [h.date.strftime('%Y-%m-%d') for h in history_data]
     chart_history_values = [float(h.total_value_rub) for h in history_data]
+
+    # --- Подготовка данных для новых аналитических графиков ---
+    # 1. График PnL по активам
+    assets_with_pnl = []
+    for ticker, data in final_assets_list:
+        if data['average_buy_price'] > 0:
+            invested_usdt = data['total_quantity'] * data['average_buy_price']
+            pnl_usdt = data['total_value_usdt'] - invested_usdt
+            assets_with_pnl.append({'ticker': ticker, 'pnl': pnl_usdt})
+    
+    # Сортируем по PnL для наглядности
+    sorted_pnl = sorted(assets_with_pnl, key=lambda x: x['pnl'], reverse=True)
+    pnl_chart_labels = [item['ticker'] for item in sorted_pnl]
+    pnl_chart_data = [float(item['pnl']) for item in sorted_pnl]
+
+    # 2. Круговая диаграмма распределения по платформам
+    platform_pie_labels = [item[0] for item in platform_summary]
+    platform_pie_data = [float(item[1]['total_rub']) for item in platform_summary]
 
     # --- Новые данные для графиков производительности ---
     performance_chart_data, performance_chart_last_updated = get_performance_chart_data_from_cache()
 
-    # --- Получаем несколько последних новостей для превью ---
-    try:
-        # ИЗМЕНЕНО: Используем новую кэширующую функцию
-        latest_news = get_crypto_news(limit=5)
-    except Exception as e:
-        current_app.logger.error(f"Не удалось загрузить превью новостей: {e}")
-        latest_news = []
-
-    return render_template('crypto_assets_overview.html', 
-                           assets=final_assets_list, grand_total_rub=grand_total_rub, grand_total_usdt=grand_total_usdt, 
-                           platform_summary=platform_summary, chart_labels=json.dumps(chart_labels), 
-                           chart_data=json.dumps(chart_data), chart_history_labels=json.dumps(chart_history_labels), 
-                           chart_history_values=json.dumps(chart_history_values), 
+    return render_template('crypto_assets_overview.html',
+                           assets=final_assets_list, grand_total_rub=grand_total_rub, grand_total_usdt=grand_total_usdt,
+                           platform_summary=platform_summary, chart_labels=json.dumps(chart_labels),
+                           chart_data=json.dumps(chart_data), chart_history_labels=json.dumps(chart_history_labels),
+                           chart_history_values=json.dumps(chart_history_values),
                            performance_chart_data=json.dumps(performance_chart_data),
                            performance_chart_last_updated=performance_chart_last_updated,
-                           latest_news=latest_news)
+                           pnl_chart_labels=json.dumps(pnl_chart_labels),
+                           pnl_chart_data=json.dumps(pnl_chart_data),
+                           platform_pie_labels=json.dumps(platform_pie_labels),
+                           platform_pie_data=json.dumps(platform_pie_data))
+
+def _apply_crypto_transaction_filters_and_sort(query, args):
+    """
+    Применяет общие фильтры и сортировку из аргументов запроса к запросу транзакций.
+    Фильтры по дате обрабатываются отдельно вызывающей стороной из-за разной логики обработки ошибок.
+    """
+    # Применяем фильтры
+    if args.get('filter_type', 'all') != 'all':
+        query = query.filter(Transaction.type == args.get('filter_type'))
+    
+    if args.get('filter_platform_id', 'all') != 'all':
+        query = query.filter(Transaction.platform_id == int(args.get('filter_platform_id')))
+
+    if args.get('filter_asset', 'all') != 'all':
+        query = query.filter(
+            or_(Transaction.asset1_ticker == args.get('filter_asset'), Transaction.asset2_ticker == args.get('filter_asset')))
+    
+    # Применяем сортировку
+    sort_by = args.get('sort_by', 'timestamp')
+    order = args.get('order', 'desc')
+    sort_column = getattr(Transaction, sort_by, Transaction.timestamp)
+    if order == 'desc':
+        query = query.order_by(desc(sort_column))
+    else:
+        query = query.order_by(asc(sort_column))
+        
+    return query
+
+@main_bp.route('/api/crypto-transactions')
+def api_crypto_transactions():
+    """
+    API эндпоинт для получения следующих страниц транзакций в виде HTML.
+    Используется для функционала "Загрузить еще".
+    """
+    page = request.args.get('page', 1, type=int)
+    start_date_str = request.args.get('start_date', '')
+    end_date_str = request.args.get('end_date', '')
+
+    transactions_query = Transaction.query.join(InvestmentPlatform).filter(
+        InvestmentPlatform.platform_type == 'crypto_exchange'
+    ).options(joinedload(Transaction.platform))
+
+    # Применяем общие фильтры и сортировку
+    transactions_query = _apply_crypto_transaction_filters_and_sort(transactions_query, request.args)
+
+    try:
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            transactions_query = transactions_query.filter(Transaction.timestamp >= start_date)
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            transactions_query = transactions_query.filter(Transaction.timestamp < end_date + timedelta(days=1))
+    except ValueError:
+        pass # Ignore invalid date format in API calls
+
+    pagination = transactions_query.paginate(page=page, per_page=150, error_out=False)
+    transactions = pagination.items
+
+    html = render_template('_crypto_transaction_rows.html', transactions=transactions)
+    return jsonify({'html': html, 'has_next': pagination.has_next})
 
 @main_bp.route('/crypto-transactions')
 def ui_crypto_transactions():
     page = request.args.get('page', 1, type=int)
-    sort_by = request.args.get('sort_by', 'timestamp')
-    order = request.args.get('order', 'desc')
-    filter_type = request.args.get('filter_type', 'all')
-    filter_platform_id = request.args.get('filter_platform_id', 'all')
+    start_date_str = request.args.get('start_date', '')
+    end_date_str = request.args.get('end_date', '')
 
     # ИСПРАВЛЕНО: Базовый запрос теперь фильтрует транзакции, чтобы показывать только те,
     # которые относятся к платформам типа 'crypto_exchange'.
@@ -1135,35 +1011,54 @@ def ui_crypto_transactions():
         InvestmentPlatform.platform_type == 'crypto_exchange'
     ).options(joinedload(Transaction.platform))
 
-    # Apply filters
-    if filter_type != 'all':
-        transactions_query = transactions_query.filter(Transaction.type == filter_type)
-    
-    if filter_platform_id != 'all':
-        # Убедимся, что фильтр по платформе не отменяет фильтр по типу платформы
-        transactions_query = transactions_query.filter(Transaction.platform_id == int(filter_platform_id))
+    # Применяем общие фильтры и сортировку
+    transactions_query = _apply_crypto_transaction_filters_and_sort(transactions_query, request.args)
 
-    # Apply sorting
-    sort_column = getattr(Transaction, sort_by, Transaction.timestamp)
-    if order == 'desc':
-        transactions_query = transactions_query.order_by(desc(sort_column))
-    else:
-        transactions_query = transactions_query.order_by(asc(sort_column))
-    
+    # ИЗМЕНЕНО: Добавлен фильтр по диапазону дат
+    try:
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            transactions_query = transactions_query.filter(Transaction.timestamp >= start_date)
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            # Включаем весь день до 23:59:59, фильтруя по "меньше следующего дня"
+            transactions_query = transactions_query.filter(Transaction.timestamp < end_date + timedelta(days=1))
+    except ValueError:
+        flash('Неверный формат даты. Используйте ГГГГ-ММ-ДД.', 'danger')
+        start_date_str, end_date_str = '', '' # Сбрасываем даты при ошибке
+
     # Paginate the results
-    transactions_pagination = transactions_query.paginate(page=page, per_page=current_app.config.get('ITEMS_PER_PAGE', 50), error_out=False)
+    # Старая логика подсчета сводки возвращается на клиент, поэтому показываем больше данных.
+    transactions_pagination = transactions_query.paginate(page=page, per_page=150, error_out=False)
     
     # ИСПРАВЛЕНО: Получаем типы транзакций и платформы только для криптобирж
     unique_transaction_types = [r[0] for r in db.session.query(Transaction.type).join(InvestmentPlatform).filter(InvestmentPlatform.platform_type == 'crypto_exchange').distinct().order_by(Transaction.type).all()]
     available_platforms = InvestmentPlatform.query.filter_by(platform_type='crypto_exchange').order_by(InvestmentPlatform.name).all()
+    
+    # УЛУЧШЕНО: Получаем список всех уникальных активов для выпадающего списка фильтра.
+    asset1_tickers = db.session.query(Transaction.asset1_ticker).join(InvestmentPlatform).filter(
+        InvestmentPlatform.platform_type == 'crypto_exchange',
+        Transaction.asset1_ticker.isnot(None)
+    ).distinct()
+    asset2_tickers = db.session.query(Transaction.asset2_ticker).join(InvestmentPlatform).filter(
+        InvestmentPlatform.platform_type == 'crypto_exchange',
+        Transaction.asset2_ticker.isnot(None)
+    ).distinct()
+    unique_assets = sorted(list(set([r[0] for r in asset1_tickers] + [r[0] for r in asset2_tickers])))
 
     return render_template('crypto_transactions.html', 
                            transactions=transactions_pagination.items,
                            pagination=transactions_pagination,
-                           sort_by=sort_by, order=order, 
-                           filter_type=filter_type, filter_platform_id=filter_platform_id,
+                           sort_by=request.args.get('sort_by', 'timestamp'), 
+                           order=request.args.get('order', 'desc'), 
+                           filter_type=request.args.get('filter_type', 'all'), 
+                           filter_platform_id=request.args.get('filter_platform_id', 'all'),
+                           filter_asset=request.args.get('filter_asset', 'all'),
+                           start_date=start_date_str,
+                           end_date=end_date_str,
                            unique_transaction_types=unique_transaction_types, 
-                           platforms=available_platforms)
+                           platforms=available_platforms, 
+                           unique_assets=unique_assets)
 
 @main_bp.route('/crypto-assets/refresh-historical-data', methods=['POST'])
 def ui_refresh_historical_data():
@@ -1236,7 +1131,7 @@ def ui_transactions():
     else:
         query = query.order_by(asc(sort_column))
 
-    pagination = query.paginate(page=page, per_page=current_app.config.get('ITEMS_PER_PAGE', 50), error_out=False)
+    pagination = query.paginate(page=page, per_page=50, error_out=False)
     accounts = Account.query.filter_by(is_active=True).order_by(Account.name).all()
     unique_types = [r[0] for r in db.session.query(BankingTransaction.transaction_type).distinct().order_by(BankingTransaction.transaction_type).all()]
 

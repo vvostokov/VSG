@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import render_pagination, format_decimal %}
 
 {% block head_extra %}
 <style>
@@ -21,7 +22,7 @@
 
 {% macro sort_link(column, title) %}
     {% set new_order = 'asc' if sort_by == column and order == 'desc' else 'desc' %}
-    <a href="{{ url_for('main.ui_crypto_transactions', sort_by=column, order=new_order, filter_type=filter_type, filter_platform_id=filter_platform_id, page=1) }}">
+    <a href="{{ url_for('main.ui_crypto_transactions', sort_by=column, order=new_order, filter_type=filter_type, filter_platform_id=filter_platform_id, filter_asset=filter_asset, start_date=start_date, end_date=end_date, page=1) }}">
         {{ title }}
         {% if sort_by == column %}
             {% if order == 'asc' %}<i class="fas fa-sort-up"></i>{% else %}<i class="fas fa-sort-down"></i>{% endif %}
@@ -44,29 +45,44 @@
     <div class="card mb-4">
         <div class="card-body">
             <h5 class="card-title">Фильтры</h5>
-            <form method="GET" action="{{ url_for('main.ui_crypto_transactions') }}" class="row align-items-end"> <!-- Changed form-row to row for BS4/5 compatibility -->
-                <div class="form-group col-md-4">
-                    <label for="filter_platform_id">Платформа</label>
-                    <select name="filter_platform_id" id="filter_platform_id" class="form-control">
+            <form method="GET" action="{{ url_for('main.ui_crypto_transactions') }}" class="row align-items-end">
+                <div class="form-group col-12 col-md-4 col-lg-2 mb-2">
+                    <label for="filter_platform_id" class="form-label">Платформа</label>
+                    <select name="filter_platform_id" id="filter_platform_id" class="form-control" onchange="this.form.submit()">
                         <option value="all">Все платформы</option>
                         {% for p in platforms %}
                         <option value="{{ p.id }}" {% if filter_platform_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="form-group col-md-4">
-                    <label for="filter_type">Тип транзакции</label>
-                    <select name="filter_type" id="filter_type" class="form-control">
+                <div class="form-group col-12 col-md-4 col-lg-2 mb-2">
+                    <label for="filter_type" class="form-label">Тип</label>
+                    <select name="filter_type" id="filter_type" class="form-control" onchange="this.form.submit()">
                         <option value="all">Все типы</option>
                         {% for tx_type in unique_transaction_types %}
-                        <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type|capitalize }}</option> <!-- Capitalize for display -->
+                        <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type|capitalize }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="form-group col-md-2">
-                    <button type="submit" class="btn btn-primary btn-block">Применить</button>
+                <div class="form-group col-12 col-md-4 col-lg-2 mb-2">
+                    <label for="filter_asset" class="form-label">Актив</label>
+                    <select name="filter_asset" id="filter_asset" class="form-control" onchange="this.form.submit()">
+                        <option value="all">Все активы</option>
+                        {% for asset in unique_assets %}
+                        <option value="{{ asset }}" {% if filter_asset == asset %}selected{% endif %}>{{ asset }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
-                <div class="form-group col-md-2">
+                <div class="form-group col-12 col-md-6 col-lg-2 mb-2">
+                    <label for="start_date" class="form-label">С даты</label>
+                    <input type="date" id="start_date" name="start_date" value="{{ start_date }}" class="form-control" onchange="this.form.submit()">
+                </div>
+                <div class="form-group col-12 col-md-6 col-lg-2 mb-2">
+                    <label for="end_date" class="form-label">По дату</label>
+                    <input type="date" id="end_date" name="end_date" value="{{ end_date }}" class="form-control" onchange="this.form.submit()">
+                </div>
+                <div class="form-group col-12 col-lg-2 mb-2">
+                    <label>&nbsp;</label>
                     <a href="{{ url_for('main.ui_crypto_transactions') }}" class="btn btn-secondary btn-block">Сбросить</a>
                 </div>
             </form>
@@ -81,12 +97,12 @@
                     <th>{{ sort_link('timestamp', 'Дата') }}</th>
                     <th>Платформа</th>
                     <th>{{ sort_link('type', 'Тип') }}</th>
-                    <th>{{ sort_link('asset1_ticker', 'Актив 1') }}</th>
+                    <th class="d-none d-md-table-cell">{{ sort_link('asset1_ticker', 'Актив 1') }}</th>
                     <th class="text-end">Кол-во 1</th>
-                    <th>{{ sort_link('asset2_ticker', 'Актив 2') }}</th>
-                    <th class="text-end">Кол-во 2</th>
-                    <th class="text-end">Цена исп.</th>
-                    <th>Комиссия</th>
+                    <th class="d-none d-md-table-cell">{{ sort_link('asset2_ticker', 'Актив 2') }}</th>
+                    <th class="text-end d-none d-lg-table-cell">Кол-во 2</th>
+                    <th class="text-end d-none d-md-table-cell">Цена исп.</th>
+                    <th class="d-none d-lg-table-cell">Комиссия</th>
                 </tr>
             </thead>
             <tbody>
@@ -105,21 +121,25 @@
                     data-asset2-amount="{{ tx.asset2_amount|trim_zeros if tx.asset2_amount is not none else '0' }}"
                     data-asset1-ticker="{{ tx.asset1_ticker }}"
                     data-asset2-ticker="{{ tx.asset2_ticker or '' }}">
-                    <td><input type="checkbox" class="tx-selector"></td>
+                    <td><input type="checkbox" class="tx-selector" name="transaction_ids" value="{{ tx.id }}"></td>
                     <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=tx.platform.id) }}">{{ tx.platform.name }}</a></td>
                     <td class="text-center">
                         <span class="badge badge-pill {{ badge_map.get(tx.type, 'badge-light') }}">{{ tx.type|capitalize }}</span>
+                        {# На мобильных устройствах показываем только основную информацию #}
+                        <div class="d-md-none">
+                            <strong>{{ tx.asset1_ticker }}</strong>: {{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}
+                        </div>
                         {% if tx.raw_type and tx.raw_type|lower != tx.type|lower %}
-                        <small class="text-muted d-block">({{ tx.raw_type }})</small>
+                        <small class="text-muted d-none d-md-block">({{ tx.raw_type }})</small>
                         {% endif %}
                     </td>
-                    <td>{{ tx.asset1_ticker }}</td>
+                    <td class="d-none d-md-table-cell">{{ tx.asset1_ticker }}</td>
                     <td class="text-end text-monospace">{{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}</td>
-                    <td>{{ tx.asset2_ticker or '-' }}</td>
-                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }}</td>
-                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
-                    <td class="text-monospace">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
+                    <td class="d-none d-md-table-cell">{{ tx.asset2_ticker or '-' }}</td>
+                    <td class="text-end text-monospace d-none d-lg-table-cell">{{ "%.8f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }}</td>
+                    <td class="text-end text-monospace d-none d-md-table-cell">{{ "%.8f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
+                    <td class="text-monospace d-none d-lg-table-cell">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
                 </tr>
                 {% else %}
                 <tr>
@@ -130,27 +150,12 @@
         </table>
     </div>
 
-    {% if pagination and pagination.pages > 1 %}
-        <nav aria-label="Навигация по транзакциям">
-            <ul class="pagination justify-content-center">
-                {% set base_args = {'sort_by': sort_by, 'order': order, 'filter_type': filter_type, 'filter_platform_id': filter_platform_id} %}
-                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
-                    <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=pagination.prev_num, **base_args) }}">&laquo;</a>
-                </li>
-                {% for p in pagination.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
-                    {% if p %}
-                        <li class="page-item {% if p == pagination.page %}active{% endif %}">
-                            <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=p, **base_args) }}">{{ p }}</a>
-                        </li>
-                    {% else %}
-                        <li class="page-item disabled"><span class="page-link">…</span></li>
-                    {% endif %}
-                {% endfor %}
-                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
-                    <a class="page-link" href="{{ url_for('main.ui_crypto_transactions', page=pagination.next_num, **base_args) }}">&raquo;</a>
-                </li>
-            </ul>
-        </nav>
+    {% if pagination and pagination.has_next %}
+    <div class="text-center mt-4" id="load-more-container">
+        <button id="load-more-btn" class="btn btn-primary" data-next-page="{{ pagination.next_num }}">
+            Загрузить еще
+        </button>
+    </div>
     {% endif %}
 </div>
 {% endblock %}
@@ -158,19 +163,37 @@
 {% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // --- Constants and Selectors ---
+    const STORAGE_KEY = 'selectedCryptoTxIds';
     const selectAllCheckbox = document.getElementById('select-all');
-    const itemCheckboxes = document.querySelectorAll('.tx-selector');
     const summaryContainer = document.getElementById('selection-summary');
     const summaryPanel = document.getElementById('selection-summary-container');
-    const transactionRows = document.querySelectorAll('.transaction-row');
+    const filterControls = document.querySelectorAll('#filter_type, #filter_platform_id, #filter_asset');
+    const tableBody = document.querySelector('.table tbody');
 
+    // --- Local Storage Functions ---
+    function getSelectedIds() {
+        // ИСПРАВЛЕНО: Добавлена обработка ошибок при чтении данных из localStorage.
+        // Если в хранилище окажутся некорректные данные (например, от старой версии кода),
+        // это приводило к ошибке JavaScript, и вся логика переставала работать.
+        // Теперь, в случае ошибки, хранилище будет очищено, и работа продолжится.
+        try {
+            return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
+        } catch (e) {
+            console.error("Ошибка чтения ID из localStorage, хранилище будет очищено:", e);
+            localStorage.removeItem(STORAGE_KEY);
+            return new Set();
+        }
+    }
+
+    function saveSelectedIds(idsSet) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(idsSet)));
+    }
+
+    // --- Summary Panel Logic ---
     function formatNumber(num, maxDecimals = 8) {
         if (isNaN(num) || num === null) return '0';
-        // Handle very small numbers that might be in scientific notation
-        if (Math.abs(num) < 1e-6) {
-            return Number(num).toExponential(4);
-        }
-        // Округляем до maxDecimals, затем убираем незначащие нули
+        if (Math.abs(num) < 1e-6) return Number(num).toExponential(4);
         const fixed = Number(num).toFixed(maxDecimals);
         const parts = fixed.replace(/\.?0+$/, '').split('.');
         parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -178,22 +201,20 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function updateSummary() {
-        const selectedRows = document.querySelectorAll('.tx-selector:checked');
+        const selectedIds = getSelectedIds();
+        // ИСПРАВЛЕНО: Получаем актуальный список чекбоксов со всей страницы
+        const selectedCheckboxesOnPage = Array.from(document.querySelectorAll('.tx-selector')).filter(cb => cb.checked);
 
-        if (selectedRows.length === 0) {
+        if (selectedIds.size === 0) {
             summaryPanel.style.display = 'none';
             return;
         }
 
-        const summaryData = {}; // { "BTC/USDT": { "buy": {...}, "sell": {...} } }
-
-        selectedRows.forEach(cb => {
+        const summaryData = {};
+        selectedCheckboxesOnPage.forEach(cb => {
             const row = cb.closest('.transaction-row');
             const type = row.dataset.type;
-
-            if (type !== 'buy' && type !== 'sell') {
-                return; // Считаем только покупки и продажи
-            }
+            if (type !== 'buy' && type !== 'sell') return;
 
             const pair = row.dataset.pair;
             const asset1Amount = parseFloat(row.dataset.asset1Amount);
@@ -201,94 +222,157 @@ document.addEventListener('DOMContentLoaded', function() {
             const asset1Ticker = row.dataset.asset1Ticker;
             const asset2Ticker = row.dataset.asset2Ticker;
 
-            if (!summaryData[pair]) {
-                summaryData[pair] = {};
-            }
+            if (!summaryData[pair]) summaryData[pair] = {};
             if (!summaryData[pair][type]) {
                 summaryData[pair][type] = {
-                    totalAsset1: 0,
-                    totalAsset2: 0,
-                    count: 0,
-                    asset1Ticker: asset1Ticker,
-                    asset2Ticker: asset2Ticker
+                    totalAsset1: 0, totalAsset2: 0, count: 0,
+                    asset1Ticker: asset1Ticker, asset2Ticker: asset2Ticker
                 };
             }
-
             summaryData[pair][type].totalAsset1 += asset1Amount;
             summaryData[pair][type].totalAsset2 += asset2Amount;
             summaryData[pair][type].count += 1;
         });
 
-        if (Object.keys(summaryData).length === 0) {
-            summaryPanel.style.display = 'none';
-            return;
-        }
+        let summaryHtml = `<div class="p-2"><strong>Всего выбрано: ${selectedIds.size}</strong> (на этой странице: ${selectedCheckboxesOnPage.length}). Сводка ниже посчитана только для выбранных на <strong>текущей</strong> странице.</div>`;
 
-        let summaryHtml = `
-            <table class="table table-sm table-bordered mb-0">
-                <thead class="thead-light">
-                    <tr>
-                        <th>Тип</th>
-                        <th>Пара</th>
-                        <th>Кол-во операций</th>
-                        <th>Суммарный объем</th>
-                        <th>Суммарная стоимость</th>
-                        <th>Средняя цена</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
-        for (const pair in summaryData) {
-            for (const type in summaryData[pair]) {
-                const data = summaryData[pair][type];
-                const avgPrice = data.totalAsset1 > 0 ? data.totalAsset2 / data.totalAsset1 : 0;
-                const typeClass = type === 'buy' ? 'text-success' : 'text-danger';
-
-                summaryHtml += `
-                    <tr>
-                        <td class="${typeClass} font-weight-bold">${type === 'buy' ? 'Покупка' : 'Продажа'}</td>
-                        <td><strong>${pair}</strong></td>
-                        <td>${data.count}</td>
-                        <td class="text-monospace">${formatNumber(data.totalAsset1)} ${data.asset1Ticker}</td>
-                        <td class="text-monospace">${formatNumber(data.totalAsset2, 2)} ${data.asset2Ticker}</td>
-                        <td class="text-monospace">${formatNumber(avgPrice, 4)} ${data.asset2Ticker}</td>
-                    </tr>
-                `;
+        if (Object.keys(summaryData).length > 0) {
+            summaryHtml += `
+                <table class="table table-sm table-bordered mb-0">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>Тип</th><th>Пара</th><th class="d-none d-md-table-cell">Кол-во</th><th>Объем</th><th class="d-none d-md-table-cell">Стоимость</th><th class="d-none d-lg-table-cell">Ср. цена</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            for (const pair in summaryData) {
+                for (const type in summaryData[pair]) {
+                    const data = summaryData[pair][type];
+                    const avgPrice = data.totalAsset1 > 0 ? data.totalAsset2 / data.totalAsset1 : 0;
+                    const typeClass = type === 'buy' ? 'text-success' : 'text-danger';
+                    summaryHtml += `
+                        <tr>
+                            <td class="${typeClass} font-weight-bold">${type === 'buy' ? 'Покупка' : 'Продажа'}</td>
+                            <td><strong>${pair}</strong></td>
+                            <td class="d-none d-md-table-cell">${data.count}</td>
+                            <td class="text-monospace">${formatNumber(data.totalAsset1)} ${data.asset1Ticker}</td>
+                            <td class="text-monospace d-none d-md-table-cell">${formatNumber(data.totalAsset2, 2)} ${data.asset2Ticker}</td>
+                            <td class="text-monospace d-none d-lg-table-cell">${formatNumber(avgPrice, 4)} ${data.asset2Ticker}</td>
+                        </tr>
+                    `;
+                }
             }
+            summaryHtml += '</tbody></table>';
         }
-
-        summaryHtml += '</tbody></table>';
+        
         summaryContainer.innerHTML = summaryHtml;
         summaryPanel.style.display = 'block';
     }
 
-    // Обработчик для "Выбрать все"
-    selectAllCheckbox.addEventListener('change', function(e) {
-        itemCheckboxes.forEach(cb => {
-            cb.checked = e.target.checked;
-        });
+    // --- Event Handlers ---
+    function handleCheckboxChange(checkbox) {
+        const selectedIds = getSelectedIds();
+        if (checkbox.checked) {
+            selectedIds.add(checkbox.value);
+        } else {
+            selectedIds.delete(checkbox.value);
+        }
+        saveSelectedIds(selectedIds);
         updateSummary();
-    });
+    }
 
-    // Обработчики для отдельных чекбоксов
-    itemCheckboxes.forEach(cb => {
-        cb.addEventListener('change', updateSummary);
-    });
+    // --- Initialization & Event Delegation ---
+    function syncCheckboxesWithStorage() {
+        const selectedIds = getSelectedIds();
+        document.querySelectorAll('.tx-selector').forEach(cb => {
+            cb.checked = selectedIds.has(cb.value);
+        });
+    }
 
-    // Обработчик для клика по строке (улучшение UX)
-    transactionRows.forEach(row => {
-        row.addEventListener('click', function(e) {
-            // Не перехватываем клики по ссылкам или самим чекбоксам
-            if (e.target.tagName === 'A' || e.target.tagName === 'INPUT') {
-                return;
+    syncCheckboxesWithStorage();
+    updateSummary();
+
+    selectAllCheckbox.addEventListener('change', function(e) {
+        // ИСПРАВЛЕНО: Получаем актуальный список чекбоксов
+        document.querySelectorAll('.tx-selector').forEach(cb => {
+            if (cb.checked !== e.target.checked) {
+                cb.checked = e.target.checked;
+                handleCheckboxChange(cb);
             }
-            const cb = row.querySelector('.tx-selector');
-            cb.checked = !cb.checked;
-            // Вручную вызываем событие change, чтобы обновить сводку
-            cb.dispatchEvent(new Event('change'));
         });
     });
+    
+    // ИСПРАВЛЕНО: Используем делегирование событий для кликов по строкам и чекбоксам
+    tableBody.addEventListener('click', function(e) {
+        const row = e.target.closest('.transaction-row');
+        if (!row) return; // Клик был не на строке
+        if (e.target.tagName === 'A') return; // Игнорируем клики по ссылкам
+
+        // Если клик был не на чекбоксе, инвертируем его состояние
+        if (e.target.type !== 'checkbox') {
+            const cb = row.querySelector('.tx-selector');
+            if (cb) {
+                cb.checked = !cb.checked;
+                // Триггерим событие change вручную, чтобы сработал наш обработчик
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    });
+
+    tableBody.addEventListener('change', function(e) {
+        if (e.target.classList.contains('tx-selector')) {
+            handleCheckboxChange(e.target);
+        }
+    });
+
+    filterControls.forEach(control => {
+        control.addEventListener('change', function() {
+            saveSelectedIds(new Set()); // Очищаем выбор при смене фильтра
+        });
+    });
+
+    // --- Load More Logic ---
+    const loadMoreContainer = document.getElementById('load-more-container');
+    if (loadMoreContainer) {
+        const loadMoreBtn = document.getElementById('load-more-btn');
+
+        loadMoreBtn.addEventListener('click', async function() {
+            const nextPage = this.dataset.nextPage;
+            if (!nextPage) return;
+
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Загрузка...';
+
+            const urlParams = new URLSearchParams(window.location.search);
+            urlParams.set('page', nextPage);
+            
+            try {
+                const response = await fetch(`{{ url_for('main.api_crypto_transactions') }}?${urlParams.toString()}`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                tableBody.insertAdjacentHTML('beforeend', data.html);
+
+                // После добавления новых строк, синхронизируем их состояние с localStorage
+                syncCheckboxesWithStorage();
+
+                if (data.has_next) {
+                    this.dataset.nextPage = parseInt(nextPage) + 1;
+                } else {
+                    loadMoreContainer.remove();
+                }
+            } catch (error) {
+                console.error('Failed to load more transactions:', error);
+                this.innerHTML = 'Ошибка загрузки';
+            } finally {
+                if (document.body.contains(this)) {
+                    this.disabled = false;
+                    this.innerHTML = 'Загрузить еще';
+                }
+            }
+        });
+    }
 });
 </script>
 {% endblock %}
