@@ -19,6 +19,7 @@ et_xmlfile==2.0.0
 feedparser==6.0.11
 Flask==3.1.1
 Flask-Migrate==4.1.0
+Flask-APScheduler==1.13.1
 Flask-SQLAlchemy==3.1.1
 gunicorn
 frozenlist==1.7.0
