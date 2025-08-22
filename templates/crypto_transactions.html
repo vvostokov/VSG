@@ -58,6 +58,38 @@
             margin-right: -15px;
             margin-left: -15px;
         }
+
+        /* NEW: Responsive styles for the summary table */
+        .responsive-summary-table {
+            border: 0;
+        }
+        .responsive-summary-table thead {
+            display: none;
+        }
+        .responsive-summary-table tr {
+            display: block;
+            border-bottom: 1px solid #dee2e6;
+            padding: 0.5rem 0;
+            margin-bottom: 0; /* Override default tr margin */
+        }
+        .responsive-summary-table tr:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+        .responsive-summary-table td {
+            display: block;
+            text-align: right !important;
+            padding-left: 50% !important;
+            position: relative;
+            border: none; /* Override .table-bordered */
+        }
+        .responsive-summary-table td::before {
+            content: attr(data-label);
+            position: absolute;
+            left: 0.75rem;
+            font-weight: bold;
+            text-align: left;
+        }
     }
 </style>
 {% endblock %}
@@ -279,10 +311,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (Object.keys(summaryData).length > 0) {
             summaryHtml += `
-                <table class="table table-sm table-bordered mb-0">
+                <table class="table table-sm table-bordered mb-0 responsive-summary-table">
                     <thead class="thead-light">
                         <tr>
-                            <th>Тип</th><th>Пара</th><th class="d-none d-md-table-cell">Кол-во</th><th>Объем</th><th class="d-none d-md-table-cell">Стоимость</th><th class="d-none d-lg-table-cell">Ср. цена</th>
+                            <th>Тип</th><th>Пара</th><th>Кол-во</th><th>Объем</th><th>Стоимость</th><th>Ср. цена</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -292,14 +324,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     const data = summaryData[pair][type];
                     const avgPrice = data.totalAsset1 > 0 ? data.totalAsset2 / data.totalAsset1 : 0;
                     const typeClass = type === 'buy' ? 'text-success' : 'text-danger';
+                    const typeText = type === 'buy' ? 'Покупка' : 'Продажа';
                     summaryHtml += `
                         <tr>
-                            <td class="${typeClass} font-weight-bold">${type === 'buy' ? 'Покупка' : 'Продажа'}</td>
-                            <td><strong>${pair}</strong></td>
-                            <td class="d-none d-md-table-cell">${data.count}</td>
-                            <td class="text-monospace">${formatNumber(data.totalAsset1)} ${data.asset1Ticker}</td>
-                            <td class="text-monospace d-none d-md-table-cell">${formatNumber(data.totalAsset2, 2)} ${data.asset2Ticker}</td>
-                            <td class="text-monospace d-none d-lg-table-cell">${formatNumber(avgPrice, 4)} ${data.asset2Ticker}</td>
+                            <td data-label="Тип" class="${typeClass} font-weight-bold">${typeText}</td>
+                            <td data-label="Пара"><strong>${pair}</strong></td>
+                            <td data-label="Кол-во">${data.count}</td>
+                            <td data-label="Объем" class="text-monospace">${formatNumber(data.totalAsset1)} ${data.asset1Ticker}</td>
+                            <td data-label="Стоимость" class="text-monospace">${formatNumber(data.totalAsset2, 2)} ${data.asset2Ticker}</td>
+                            <td data-label="Ср. цена" class="text-monospace">${formatNumber(avgPrice, 4)} ${data.asset2Ticker}</td>
                         </tr>
                     `;
                 }
