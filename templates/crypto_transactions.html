@@ -15,6 +15,50 @@
     .table-sm th, .table-sm td {
         padding: 0.4rem; /* Увеличим паддинг для лучшей читаемости */
     }
+    /* Адаптивная таблица для мобильных устройств */
+    @media screen and (max-width: 767.98px) {
+        .responsive-table thead {
+            display: none;
+        }
+        .responsive-table tr {
+            display: block;
+            border: 1px solid #dee2e6;
+            margin-bottom: 1rem;
+            /* NEW: Remove horizontal borders and radius for full-width view */
+            border-left: none;
+            border-right: none;
+            border-radius: 0;
+        }
+        .responsive-table td {
+            display: block;
+            text-align: right !important; /* Переопределяем выравнивание для мобильных */
+            padding-left: 50% !important;
+            position: relative;
+            border-top: 1px solid #e9ecef;
+        }
+        .responsive-table td:first-child {
+            border-top: none;
+            text-align: left !important;
+            padding-left: 0.4rem !important;
+        }
+        .responsive-table td::before {
+            content: attr(data-label);
+            position: absolute;
+            left: 0.75rem;
+            font-weight: bold;
+            text-align: left;
+        }
+        .responsive-table td:first-child::before {
+            display: none;
+        }
+
+        /* NEW: Make table container full-width on mobile to use all space */
+        .table-container-full-width {
+            /* These negative margins counteract the padding of the parent .container */
+            margin-right: -15px;
+            margin-left: -15px;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -59,6 +103,7 @@
                     <label for="filter_type" class="form-label">Тип</label>
                     <select name="filter_type" id="filter_type" class="form-control" onchange="this.form.submit()">
                         <option value="all">Все типы</option>
+                        <option value="buy_sell" {% if filter_type == 'buy_sell' %}selected{% endif %}>Buy&Sell</option>
                         {% for tx_type in unique_transaction_types %}
                         <option value="{{ tx_type }}" {% if filter_type == tx_type %}selected{% endif %}>{{ tx_type|capitalize }}</option>
                         {% endfor %}
@@ -89,20 +134,20 @@
         </div>
     </div>
 
-    <div class="table-responsive">
-        <table class="table table-sm table-hover">
+    <div class="table-container-full-width">
+        <table class="table table-sm table-hover responsive-table">
             <thead>
                 <tr>
                     <th style="width: 30px;"><input type="checkbox" id="select-all" title="Выбрать все на странице"></th>
                     <th>{{ sort_link('timestamp', 'Дата') }}</th>
                     <th>Платформа</th>
                     <th>{{ sort_link('type', 'Тип') }}</th>
-                    <th class="d-none d-md-table-cell">{{ sort_link('asset1_ticker', 'Актив 1') }}</th>
+                    <th>{{ sort_link('asset1_ticker', 'Актив 1') }}</th>
                     <th class="text-end">Кол-во 1</th>
-                    <th class="d-none d-md-table-cell">{{ sort_link('asset2_ticker', 'Актив 2') }}</th>
-                    <th class="text-end d-none d-lg-table-cell">Кол-во 2</th>
-                    <th class="text-end d-none d-md-table-cell">Цена исп.</th>
-                    <th class="d-none d-lg-table-cell">Комиссия</th>
+                    <th>{{ sort_link('asset2_ticker', 'Актив 2') }}</th>
+                    <th class="text-end">Кол-во 2</th>
+                    <th class="text-end">Цена исп.</th>
+                    <th>Комиссия</th>
                 </tr>
             </thead>
             <tbody>
@@ -122,24 +167,20 @@
                     data-asset1-ticker="{{ tx.asset1_ticker }}"
                     data-asset2-ticker="{{ tx.asset2_ticker or '' }}">
                     <td><input type="checkbox" class="tx-selector" name="transaction_ids" value="{{ tx.id }}"></td>
-                    <td>{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
-                    <td><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=tx.platform.id) }}">{{ tx.platform.name }}</a></td>
-                    <td class="text-center">
+                    <td data-label="Дата">{{ tx.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td data-label="Платформа"><a href="{{ url_for('main.ui_investment_platform_detail', platform_id=tx.platform.id) }}">{{ tx.platform.name }}</a></td>
+                    <td data-label="Тип" class="text-center">
                         <span class="badge badge-pill {{ badge_map.get(tx.type, 'badge-light') }}">{{ tx.type|capitalize }}</span>
-                        {# На мобильных устройствах показываем только основную информацию #}
-                        <div class="d-md-none">
-                            <strong>{{ tx.asset1_ticker }}</strong>: {{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}
-                        </div>
                         {% if tx.raw_type and tx.raw_type|lower != tx.type|lower %}
-                        <small class="text-muted d-none d-md-block">({{ tx.raw_type }})</small>
+                        <small class="text-muted">({{ tx.raw_type }})</small>
                         {% endif %}
                     </td>
-                    <td class="d-none d-md-table-cell">{{ tx.asset1_ticker }}</td>
-                    <td class="text-end text-monospace">{{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}</td>
-                    <td class="d-none d-md-table-cell">{{ tx.asset2_ticker or '-' }}</td>
-                    <td class="text-end text-monospace d-none d-lg-table-cell">{{ "%.8f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }}</td>
-                    <td class="text-end text-monospace d-none d-md-table-cell">{{ "%.8f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
-                    <td class="text-monospace d-none d-lg-table-cell">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
+                    <td data-label="Актив 1">{{ tx.asset1_ticker }}</td>
+                    <td data-label="Кол-во 1" class="text-end text-monospace">{{ "%.8f"|format(tx.asset1_amount)|trim_zeros if tx.asset1_amount is not none else '-' }}</td>
+                    <td data-label="Актив 2">{{ tx.asset2_ticker or '-' }}</td>
+                    <td data-label="Кол-во 2" class="text-end text-monospace">{{ "%.8f"|format(tx.asset2_amount)|trim_zeros if tx.asset2_amount is not none else '-' }}</td>
+                    <td data-label="Цена исп." class="text-end text-monospace">{{ "%.8f"|format(tx.execution_price)|trim_zeros if tx.execution_price is not none else '-' }}</td>
+                    <td data-label="Комиссия" class="text-monospace">{{ (tx.fee_amount|trim_zeros ~ ' ' ~ tx.fee_currency) if tx.fee_amount and tx.fee_amount > 0 and tx.fee_currency else '-' }}</td>
                 </tr>
                 {% else %}
                 <tr>

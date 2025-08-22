@@ -945,8 +945,13 @@ def _apply_crypto_transaction_filters_and_sort(query, args):
     Фильтры по дате обрабатываются отдельно вызывающей стороной из-за разной логики обработки ошибок.
     """
     # Применяем фильтры
-    if args.get('filter_type', 'all') != 'all':
-        query = query.filter(Transaction.type == args.get('filter_type'))
+    filter_type = args.get('filter_type', 'all')
+    if filter_type != 'all':
+        if filter_type == 'buy_sell':
+            # Если выбран новый фильтр, ищем транзакции с типом 'buy' ИЛИ 'sell'
+            query = query.filter(Transaction.type.in_(['buy', 'sell']))
+        else:
+            query = query.filter(Transaction.type == filter_type)
     
     if args.get('filter_platform_id', 'all') != 'all':
         query = query.filter(Transaction.platform_id == int(args.get('filter_platform_id')))
